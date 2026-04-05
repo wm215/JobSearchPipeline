@@ -212,7 +212,7 @@ def test_scan_scores_and_saves(tmp_path):
     assert count >= 1
     row = conn.execute("SELECT * FROM jobs").fetchone()
     assert row is not None
-    assert dict(row)["score"] > 0
+    assert dict(row)["match_score"] > 0
     conn.close()
 
 

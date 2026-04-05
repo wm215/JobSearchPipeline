@@ -33,13 +33,17 @@ CREATE TABLE IF NOT EXISTS jobs (
     salary_max      INTEGER,
     description     TEXT,
     posted_date     TEXT,
-    score           INTEGER DEFAULT 0,
+    found_date      TEXT,
+    match_score     REAL DEFAULT 0,
     score_breakdown TEXT,          -- JSON blob
+    sector          TEXT,
+    notified        INTEGER DEFAULT 0,
     applied         INTEGER DEFAULT 0,
     created_at      TEXT NOT NULL DEFAULT (datetime('now','utc')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now','utc'))
 );
-CREATE INDEX IF NOT EXISTS idx_jobs_score   ON jobs(score DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_score   ON jobs(match_score DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_found   ON jobs(found_date);
 CREATE INDEX IF NOT EXISTS idx_jobs_applied ON jobs(applied);
 CREATE INDEX IF NOT EXISTS idx_jobs_company ON jobs(company);
 
@@ -199,11 +203,11 @@ def save_job(conn: sqlite3.Connection, job: dict) -> bool:
         INSERT OR IGNORE INTO jobs
             (job_id, title, company, location, url, source,
              salary_min, salary_max, description, posted_date,
-             score, score_breakdown, applied)
+             found_date, match_score, score_breakdown, sector, applied)
         VALUES
             (:job_id, :title, :company, :location, :url, :source,
              :salary_min, :salary_max, :description, :posted_date,
-             :score, :score_breakdown, :applied)
+             :found_date, :match_score, :score_breakdown, :sector, :applied)
         """,
         {
             "job_id": job_id,
@@ -216,8 +220,10 @@ def save_job(conn: sqlite3.Connection, job: dict) -> bool:
             "salary_max": job.get("salary_max"),
             "description": job.get("description", ""),
             "posted_date": job.get("posted_date", ""),
-            "score": job.get("score", 0),
+            "found_date": job.get("found_date", datetime.now(timezone.utc).isoformat()),
+            "match_score": job.get("match_score", 0),
             "score_breakdown": score_breakdown,
+            "sector": job.get("sector", ""),
             "applied": int(job.get("applied", False)),
         },
     )
@@ -243,9 +249,9 @@ def get_top_unresearched(
         SELECT j.*
         FROM jobs j
         LEFT JOIN job_research r ON j.job_id = r.job_id
-        WHERE j.score >= ?
+        WHERE j.match_score >= ?
           AND r.job_id IS NULL
-        ORDER BY j.score DESC
+        ORDER BY j.match_score DESC
         LIMIT ?
         """,
         (min_score, limit),
@@ -265,7 +271,7 @@ def get_unprepared(conn: sqlite3.Connection, limit: int = 10) -> List[Dict]:
         INNER JOIN job_research r ON j.job_id = r.job_id
         LEFT JOIN job_applications a ON j.job_id = a.job_id
         WHERE a.job_id IS NULL
-        ORDER BY j.score DESC
+        ORDER BY j.match_score DESC
         LIMIT ?
         """,
         (limit,),

@@ -56,7 +56,7 @@ def _sample_job(**overrides) -> dict:
         "salary_min": 95_000,
         "salary_max": 130_000,
         "description": "Manage housing programs.",
-        "score": 82,
+        "match_score": 82,
     }
     base.update(overrides)
     base.setdefault(
@@ -112,7 +112,7 @@ class TestSaveAndRetrieveJob:
         assert retrieved["title"] == job["title"]
         assert retrieved["company"] == job["company"]
         assert retrieved["location"] == job["location"]
-        assert retrieved["score"] == job["score"]
+        assert retrieved["match_score"] == job["match_score"]
         assert retrieved["salary_min"] == job["salary_min"]
         assert retrieved["applied"] == 0
 
@@ -148,9 +148,9 @@ class TestSaveAndRetrieveJob:
 class TestQueryHelpers:
     def test_get_top_unresearched(self, db_conn):
         """Jobs above threshold with no research row must be returned."""
-        high = _sample_job(score=90, url="https://a.com/1")
-        low = _sample_job(score=40, title="Junior Analyst", url="https://a.com/2")
-        already_researched = _sample_job(score=85, title="Policy Dir", url="https://a.com/3")
+        high = _sample_job(match_score=90, url="https://a.com/1")
+        low = _sample_job(match_score=40, title="Junior Analyst", url="https://a.com/2")
+        already_researched = _sample_job(match_score=85, title="Policy Dir", url="https://a.com/3")
 
         for j in (high, low, already_researched):
             save_job(db_conn, j)
@@ -166,8 +166,8 @@ class TestQueryHelpers:
 
     def test_get_unprepared(self, db_conn):
         """Jobs with research but no application materials must be returned."""
-        job1 = _sample_job(score=80, url="https://b.com/1")
-        job2 = _sample_job(score=78, title="Contract Spec", url="https://b.com/2")
+        job1 = _sample_job(match_score=80, url="https://b.com/1")
+        job2 = _sample_job(match_score=78, title="Contract Spec", url="https://b.com/2")
         save_job(db_conn, job1)
         save_job(db_conn, job2)
         save_research(db_conn, job1["job_id"], {"agency_mission": "x"})

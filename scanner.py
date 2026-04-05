@@ -258,7 +258,7 @@ def scan_usajobs(conn: sqlite3.Connection, keyword: str, location: str) -> int:
                 job["salary_min"],
                 job["salary_max"],
             )
-            job["score"] = result["total_score"]
+            job["match_score"] = result["total_score"]
             job["score_breakdown"] = result["breakdown"]
             job["job_id"] = generate_job_id(
                 job["title"], job["company"], job["location"], job["url"]
@@ -369,7 +369,7 @@ def scan_indeed_apify(conn: sqlite3.Connection, keyword: str, location: str) -> 
             )
             if result["total_score"] <= 0:
                 continue
-            job["score"] = result["total_score"]
+            job["match_score"] = result["total_score"]
             job["score_breakdown"] = result["breakdown"]
             job["job_id"] = generate_job_id(
                 job["title"], job["company"], job["location"], job["url"]
