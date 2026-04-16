@@ -50,10 +50,10 @@ PROFILE: dict = {
     "current_title": "Program Analyst",
     "experience_years": 10,
     "locations": [
-        "Chicago IL",
         "Philadelphia PA",
-        "Fort Lauderdale FL",
-        "Washington DC",
+        "New Jersey",
+        "Delaware",
+        "Chicago IL",
     ],
     "salary_min": 90_000,
     "salary_max": 200_000,

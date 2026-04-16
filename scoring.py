@@ -406,21 +406,17 @@ def _score_salary(salary_min: int | None, salary_max: int | None) -> int:
 
 def _score_location(location_lower: str) -> int:
     """Score the location dimension (0-10 pts)."""
-    if "chicago" in location_lower:
-        return 10
     if "philadelphia" in location_lower or "philly" in location_lower:
         return 10
-    if "fort lauderdale" in location_lower:
+    if "new jersey" in location_lower or ", nj" in location_lower:
         return 10
-    if (
-        "washington" in location_lower
-        or ", dc" in location_lower
-        or "district of columbia" in location_lower
-    ):
-        return 9
+    if "delaware" in location_lower or ", de" in location_lower:
+        return 10
+    if "chicago" in location_lower:
+        return 7
     if "remote" in location_lower:
-        return 10
-    return 4
+        return 6
+    return 0
 
 
 # ---------------------------------------------------------------------------

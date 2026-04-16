@@ -50,6 +50,23 @@ _SALARY_K_RE = re.compile(r"\$\s*([\d]+)k\b", re.IGNORECASE)
 _GS_GRADE_RE = re.compile(r"\bgs[- ](\d{1,2})\b", re.IGNORECASE)
 
 
+def is_target_location(location: str) -> bool:
+    """Return True when *location* is in the active target geography."""
+    loc = (location or "").lower()
+    if not loc:
+        return False
+
+    if "philadelphia" in loc or "philly" in loc:
+        return True
+    if "new jersey" in loc or ", nj" in loc:
+        return True
+    if "delaware" in loc or ", de" in loc:
+        return True
+    if "chicago" in loc:
+        return True
+    return False
+
+
 def _parse_salary_token(token: str) -> int:
     """Parse a salary token like '90,000', '90000', or '90k' into an integer."""
     token = token.strip().lower()
@@ -250,6 +267,8 @@ def scan_usajobs(conn: sqlite3.Connection, keyword: str, location: str) -> int:
     for item in items:
         try:
             job = parse_usajobs_result(item)
+            if not is_target_location(job["location"]):
+                continue
             result = score_job(
                 job["title"],
                 job["description"],
@@ -359,6 +378,8 @@ def scan_indeed_apify(conn: sqlite3.Connection, keyword: str, location: str) -> 
     for item in items:
         try:
             job = parse_indeed_result(item)
+            if not is_target_location(job["location"]):
+                continue
             result = score_job(
                 job["title"],
                 job["description"],

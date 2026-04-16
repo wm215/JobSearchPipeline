@@ -65,17 +65,31 @@ log = logging.getLogger("pipeline.run")
 # Digest query helpers
 # ---------------------------------------------------------------------------
 
+_TARGET_LOCATION_SQL = """
+(
+    lower(location) LIKE '%philadelphia%'
+    OR lower(location) LIKE '%philly%'
+    OR lower(location) LIKE '%new jersey%'
+    OR lower(location) LIKE '%, nj%'
+    OR lower(location) LIKE '%delaware%'
+    OR lower(location) LIKE '%, de%'
+    OR lower(location) LIKE '%chicago%'
+)
+"""
+
+
 def _query_new_jobs(conn, limit: int = 20) -> list[dict]:
     """
     Return jobs with match_score >= 75 found in the last 24 hours.
     Falls back to top unapplied jobs if none found today.
     """
     rows = conn.execute(
-        """
+        f"""
         SELECT title, company, location, match_score, url, source
         FROM jobs
         WHERE match_score >= 75
           AND found_date >= datetime('now', '-1 day', 'utc')
+          AND {_TARGET_LOCATION_SQL}
         ORDER BY match_score DESC
         LIMIT ?
         """,
@@ -85,10 +99,11 @@ def _query_new_jobs(conn, limit: int = 20) -> list[dict]:
     if not rows:
         # Fallback: top unapplied jobs regardless of date
         rows = conn.execute(
-            """
+            f"""
             SELECT title, company, location, match_score, url, source
             FROM jobs
             WHERE applied = 0 AND match_score >= 55
+              AND {_TARGET_LOCATION_SQL}
             ORDER BY match_score DESC
             LIMIT ?
             """,

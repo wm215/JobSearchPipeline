@@ -210,7 +210,7 @@ def test_no_salary_listed_gets_neutral_score():
     assert result["breakdown"]["salary"] == 5
 
 
-def test_remote_job_gets_full_location_score():
+def test_remote_job_gets_reduced_location_score():
     result = score_job(
         title="Policy Analyst",
         description="Federal policy analysis, stakeholder engagement, compliance",
@@ -219,7 +219,7 @@ def test_remote_job_gets_full_location_score():
         salary_min=100000,
         salary_max=130000,
     )
-    assert result["breakdown"]["location"] == 10
+    assert result["breakdown"]["location"] == 6
 
 
 def test_non_target_location_gets_default_score():
@@ -231,7 +231,7 @@ def test_non_target_location_gets_default_score():
         salary_min=100000,
         salary_max=130000,
     )
-    assert result["breakdown"]["location"] == 4
+    assert result["breakdown"]["location"] == 0
 
 
 def test_breakdown_keys_present():

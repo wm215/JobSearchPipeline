@@ -160,7 +160,7 @@ def test_query_new_jobs_falls_back_to_unapplied(tmp_path):
                           match_score, found_date, applied)
         VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '-2 days', 'utc'), 0)
         """,
-        ("job001", "Program Analyst", "HUD", "DC",
+        ("job001", "Program Analyst", "HUD", "Philadelphia, PA",
          "https://usajobs.gov/1", "USAJobs", 85),
     )
     conn.commit()

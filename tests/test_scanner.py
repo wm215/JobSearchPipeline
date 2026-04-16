@@ -68,6 +68,27 @@ def test_extract_salary_empty():
 
 
 # ---------------------------------------------------------------------------
+# location targeting
+# ---------------------------------------------------------------------------
+
+
+def test_is_target_location_accepts_core_regions():
+    from scanner import is_target_location
+
+    assert is_target_location("Philadelphia, PA")
+    assert is_target_location("Camden, NJ")
+    assert is_target_location("Dover, DE")
+    assert is_target_location("Chicago, IL")
+
+
+def test_is_target_location_rejects_non_targets():
+    from scanner import is_target_location
+
+    assert not is_target_location("Washington, DC")
+    assert not is_target_location("Arlington, VA")
+
+
+# ---------------------------------------------------------------------------
 # parse_usajobs_result
 # ---------------------------------------------------------------------------
 
@@ -189,7 +210,7 @@ def test_scan_scores_and_saves(tmp_path):
                     "MatchedObjectDescriptor": {
                         "PositionTitle": "Contract Specialist",
                         "OrganizationName": "Customs and Border Protection",
-                        "PositionLocationDisplay": "Washington, DC",
+                        "PositionLocationDisplay": "Philadelphia, PA",
                         "PositionURI": "https://www.usajobs.gov/job/456",
                         "UserArea": {"Details": {"LowGrade": "13", "HighGrade": "14"}},
                         "PositionRemuneration": [
@@ -207,7 +228,7 @@ def test_scan_scores_and_saves(tmp_path):
     }
 
     with patch("scanner.requests.get", return_value=fake_response):
-        count = scan_usajobs(conn, "Contract Specialist", "Washington, DC")
+        count = scan_usajobs(conn, "Contract Specialist", "Philadelphia, PA")
 
     assert count >= 1
     row = conn.execute("SELECT * FROM jobs").fetchone()
