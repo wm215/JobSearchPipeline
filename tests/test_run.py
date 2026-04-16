@@ -197,6 +197,22 @@ def test_main_morning_dry_run_returns_zero():
     runner.assert_not_called()
 
 
+def test_main_digest_dry_run_returns_zero():
+    """Digest mode dry-run should succeed without executing external scripts."""
+    with mock.patch.object(run_module, "_run_external_script") as runner:
+        exit_code = run_module.main(["--mode", "digest", "--dry-run"])
+    assert exit_code == 0
+    runner.assert_not_called()
+
+
+def test_main_followups_dry_run_returns_zero():
+    """Followups mode dry-run should succeed without executing external scripts."""
+    with mock.patch.object(run_module, "_run_external_script") as runner:
+        exit_code = run_module.main(["--mode", "followups", "--dry-run"])
+    assert exit_code == 0
+    runner.assert_not_called()
+
+
 def test_main_nightly_passes_tracker_test_limit():
     """Nightly mode should forward tracker test limit to external script call."""
     with mock.patch.object(run_module, "_run_external_script") as runner, \

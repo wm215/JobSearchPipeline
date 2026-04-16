@@ -299,17 +299,37 @@ def _run_external_script(script_path: Path, stage_name: str, args: list[str] | N
         raise RuntimeError(f"{stage_name} failed with exit code {result.returncode}: {stderr}")
 
 
-def run_morning_bundle(dry_run: bool = False) -> int:
-    tasks = [
-        ("daily_action_digest", DAILY_ACTION_DIGEST_SCRIPT, []),
-        ("follow_up_reminders", FOLLOW_UP_REMINDERS_SCRIPT, []),
-    ]
+def _run_task_bundle(tasks: list[tuple[str, Path, list[str]]], dry_run: bool = False) -> int:
     for name, path, args in tasks:
         if dry_run:
             log.info("[dry-run] Would run %s: %s %s", name, sys.executable, path)
             continue
         _run_external_script(path, name, args)
     return 0
+
+
+def run_digest_only(dry_run: bool = False) -> int:
+    return _run_task_bundle(
+        [("daily_action_digest", DAILY_ACTION_DIGEST_SCRIPT, [])],
+        dry_run=dry_run,
+    )
+
+
+def run_followups_only(dry_run: bool = False) -> int:
+    return _run_task_bundle(
+        [("follow_up_reminders", FOLLOW_UP_REMINDERS_SCRIPT, [])],
+        dry_run=dry_run,
+    )
+
+
+def run_morning_bundle(dry_run: bool = False) -> int:
+    return _run_task_bundle(
+        [
+            ("daily_action_digest", DAILY_ACTION_DIGEST_SCRIPT, []),
+            ("follow_up_reminders", FOLLOW_UP_REMINDERS_SCRIPT, []),
+        ],
+        dry_run=dry_run,
+    )
 
 
 def run_nightly_bundle(dry_run: bool = False, tracker_test_limit: int | None = None) -> int:
@@ -329,7 +349,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Unified JobSearchPipeline runner")
     parser.add_argument(
         "--mode",
-        choices=["pipeline", "morning", "nightly", "all"],
+        choices=["pipeline", "digest", "followups", "morning", "nightly", "all"],
         default="pipeline",
         help="Choose which automation bundle to run",
     )
@@ -348,6 +368,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.mode == "pipeline":
         return run_pipeline()
+
+    if args.mode == "digest":
+        try:
+            return run_digest_only(dry_run=args.dry_run)
+        except Exception as exc:
+            log.error("Digest mode failed: %s", exc, exc_info=True)
+            return 1
+
+    if args.mode == "followups":
+        try:
+            return run_followups_only(dry_run=args.dry_run)
+        except Exception as exc:
+            log.error("Followups mode failed: %s", exc, exc_info=True)
+            return 1
 
     if args.mode == "morning":
         try:
