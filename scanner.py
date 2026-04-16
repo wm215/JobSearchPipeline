@@ -19,7 +19,10 @@ from config import (
     APIFY_API_TOKEN,
     INDEED_ACTOR,
     INDEED_KEYWORDS,
+    PHA_CAREERS_SNAPSHOT,
+    PHDC_CAREERS_URL,
     PROFILE,
+    SMARTRECRUITERS_URL,
     USAJOBS_API_KEY,
     USAJOBS_EMAIL,
     USAJOBS_SAVED_JOBS_SNAPSHOT,
@@ -525,6 +528,238 @@ def scan_indeed_apify(conn: sqlite3.Connection, keyword: str, location: str) -> 
 
 
 # ---------------------------------------------------------------------------
+# Philadelphia portal scanners
+# ---------------------------------------------------------------------------
+
+
+def scan_city_smartrecruiters(conn: sqlite3.Connection) -> int:
+    """
+    Scrape City of Philadelphia non-civil-service jobs from the SmartRecruiters
+    public API.  Returns count of new jobs saved.
+    """
+    try:
+        resp = requests.get(
+            SMARTRECRUITERS_URL,
+            params={"limit": 100},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.RequestException as exc:
+        log.error("SmartRecruiters API failed: %s", exc)
+        return 0
+
+    postings = data.get("content", [])
+    log.info("SmartRecruiters City of Philadelphia: %d postings", len(postings))
+
+    saved = 0
+    for p in postings:
+        title = p.get("name", "")
+        dept = p.get("department", {}).get("label", "")
+        loc_city = p.get("location", {}).get("city", "")
+        loc_region = p.get("location", {}).get("region", "")
+        location = f"{loc_city}, {loc_region}" if loc_region else loc_city
+        url = p.get("ref", "") or f"https://jobs.smartrecruiters.com/CityofPhiladelphia/{p.get('id', '')}"
+        posted_date = (p.get("releasedDate") or "")[:10]
+
+        if not is_target_location(location):
+            continue
+
+        result = score_job(title, dept, "City of Philadelphia", location, None, None)
+        if result["total_score"] <= 0:
+            continue
+
+        job = {
+            "title": title,
+            "company": "City of Philadelphia",
+            "location": location,
+            "url": url,
+            "source": "City Portal",
+            "description": dept,
+            "posted_date": posted_date,
+            "salary_min": None,
+            "salary_max": None,
+            "sector": "Local",
+            "match_score": result["total_score"],
+            "score_breakdown": result["breakdown"],
+            "job_id": generate_job_id(title, "City of Philadelphia", location, url),
+        }
+        if save_job(conn, job):
+            saved += 1
+
+    return saved
+
+
+def scan_phdc_careers(conn: sqlite3.Connection) -> int:
+    """
+    Scrape PHDC (Philadelphia Housing Development Corporation) careers page.
+    Simple HTML page with job links.  Returns count of new jobs saved.
+    """
+    try:
+        resp = requests.get(PHDC_CAREERS_URL, timeout=30)
+        resp.raise_for_status()
+        html = resp.text
+    except requests.RequestException as exc:
+        log.error("PHDC careers page failed: %s", exc)
+        return 0
+
+    # Extract job links: both <a href="...showJob=...">Title</a> and <h3>/<h4> headings with links
+    job_links = re.findall(
+        r'href=["\']'
+        r'(https://secure[^"\']+showJob=[^"\']+)'
+        r'["\'][^>]*>\s*(?:<strong>)?\s*([^<]+)',
+        html,
+    )
+    # Also get h3/h4 linked titles
+    heading_links = re.findall(
+        r'<h[34][^>]*>\s*<a[^>]+href=["\']([^"\']+)["\'][^>]*>\s*([^<]+)',
+        html,
+    )
+    # Merge and deduplicate by URL
+    seen_urls: set[str] = set()
+    all_links: list[tuple[str, str]] = []
+    for url, title in job_links + heading_links:
+        if url not in seen_urls and "showJob" in url:
+            seen_urls.add(url)
+            all_links.append((url.strip(), title.strip()))
+
+    log.info("PHDC careers: %d job links found", len(all_links))
+
+    saved = 0
+    for url, title in all_links:
+        result = score_job(
+            title,
+            "Philadelphia Housing Development Corporation affordable housing community development",
+            "PHDC",
+            "Philadelphia, PA",
+            None,
+            None,
+        )
+        if result["total_score"] <= 0:
+            continue
+        job = {
+            "title": title,
+            "company": "Philadelphia Housing Development Corporation",
+            "location": "Philadelphia, PA",
+            "url": url,
+            "source": "PHDC Careers",
+            "description": "Philadelphia Housing Development Corporation",
+            "posted_date": "",
+            "salary_min": None,
+            "salary_max": None,
+            "sector": "Local",
+            "match_score": result["total_score"],
+            "score_breakdown": result["breakdown"],
+            "job_id": generate_job_id(title, "PHDC", "Philadelphia, PA", url),
+        }
+        if save_job(conn, job):
+            saved += 1
+
+    return saved
+
+
+def parse_pha_snapshot(text: str) -> list[dict]:
+    """
+    Parse PHA (Philadelphia Housing Authority) careers page text into job dicts.
+
+    Expected block shape (one per job, from accessibility tree or copy-paste):
+        <title>
+        Job ID
+        "<id>"
+        Department
+        <department>
+        Posted Date
+        <date>
+    """
+    rows: list[dict] = []
+    if not text:
+        return rows
+
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    i = 0
+    while i < len(lines):
+        # Anchor on "Job ID" line, title is the line before it
+        if lines[i].lower() == "job id" and i >= 1:
+            title = lines[i - 1]
+            job_num = ""
+            dept = ""
+            posted = ""
+            # Read subsequent key-value pairs
+            j = i + 1
+            while j < len(lines) and j < i + 8:
+                line = lines[j]
+                if line.startswith('"') and line.endswith('"'):
+                    job_num = line.strip('"')
+                elif lines[j - 1] == "Department" if j > 0 else False:
+                    dept = line
+                elif lines[j - 1] == "Posted Date" if j > 0 else False:
+                    posted = line
+                j += 1
+
+            url = (
+                f"https://tam1.pha.phila.gov/psc/tam/EMPLOYEE/HRMS/c/"
+                f"HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Action=U&HRS_JOB_OPENING_ID={job_num}"
+                if job_num
+                else f"pha-careers://{generate_job_id(title, 'PHA', 'Philadelphia, PA', posted)}"
+            )
+
+            rows.append({
+                "title": title,
+                "company": "Philadelphia Housing Authority",
+                "location": "Philadelphia, PA",
+                "url": url,
+                "source": "PHA Careers",
+                "description": f"{dept} department at Philadelphia Housing Authority",
+                "posted_date": posted,
+                "salary_min": None,
+                "salary_max": None,
+                "sector": "Local",
+            })
+            i = j
+        else:
+            i += 1
+
+    return rows
+
+
+def import_pha_jobs(conn: sqlite3.Connection) -> int:
+    """Import PHA jobs from snapshot text file, if present."""
+    if not PHA_CAREERS_SNAPSHOT.exists():
+        return 0
+
+    try:
+        text = PHA_CAREERS_SNAPSHOT.read_text(encoding="utf-8")
+    except OSError as exc:
+        log.warning("Could not read PHA careers snapshot: %s", exc)
+        return 0
+
+    parsed = parse_pha_snapshot(text)
+    saved = 0
+    for job in parsed:
+        result = score_job(
+            job["title"],
+            job["description"],
+            job["company"],
+            job["location"],
+            job["salary_min"],
+            job["salary_max"],
+        )
+        if result["total_score"] <= 0:
+            continue
+        job["match_score"] = result["total_score"]
+        job["score_breakdown"] = result["breakdown"]
+        job["job_id"] = generate_job_id(
+            job["title"], job["company"], job["location"], job["url"]
+        )
+        if save_job(conn, job):
+            saved += 1
+
+    if parsed:
+        log.info("PHA careers snapshot: %d parsed, %d new", len(parsed), saved)
+    return saved
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -539,12 +774,9 @@ _USAJOBS_KEYWORDS: list[str] = [
 
 def run_scan(conn: sqlite3.Connection) -> int:
     """
-    Run a full scan across USAJobs and Indeed/Apify.
+    Run a full scan across all sources: USAJobs, Indeed/Apify, and
+    Philadelphia portals (SmartRecruiters, PHDC, PHA snapshot).
 
-    USAJobs: 5 keywords × 4 locations.
-    Indeed:  first 5 INDEED_KEYWORDS × 4 locations.
-
-    Locations come from config.PROFILE["locations"].
     Returns total count of new jobs saved.
     """
     locations: list[str] = PROFILE.get("locations", [])
@@ -552,11 +784,28 @@ def run_scan(conn: sqlite3.Connection) -> int:
 
     total = 0
 
+    # --- Snapshot imports (local files) ---
     imported_saved = import_usajobs_saved_jobs(conn)
     if imported_saved:
         log.info("Imported %d jobs from USAJobs saved snapshot", imported_saved)
         total += imported_saved
 
+    imported_pha = import_pha_jobs(conn)
+    if imported_pha:
+        log.info("Imported %d jobs from PHA careers snapshot", imported_pha)
+        total += imported_pha
+
+    # --- Philadelphia portals (HTTP) ---
+    log.info("Scanning Philadelphia portals")
+    count = scan_city_smartrecruiters(conn)
+    log.info("  City of Philadelphia (SmartRecruiters) → %d new", count)
+    total += count
+
+    count = scan_phdc_careers(conn)
+    log.info("  PHDC careers → %d new", count)
+    total += count
+
+    # --- USAJobs API ---
     log.info("Starting USAJobs scan (%d keywords × %d locations)", len(_USAJOBS_KEYWORDS), len(locations))
     for keyword in _USAJOBS_KEYWORDS:
         for location in locations:
@@ -564,6 +813,7 @@ def run_scan(conn: sqlite3.Connection) -> int:
             log.info("  USAJobs '%s' @ '%s' → %d new", keyword, location, count)
             total += count
 
+    # --- Indeed/Apify ---
     log.info("Starting Indeed/Apify scan (%d keywords × %d locations)", len(indeed_keywords), len(locations))
     for keyword in indeed_keywords:
         for location in locations:

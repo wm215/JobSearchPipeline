@@ -361,6 +361,132 @@ def test_parse_usajobs_saved_snapshot_no_url_gets_placeholder():
     assert rows[0]["url"].startswith("usajobs-saved://")
 
 
+def test_scan_city_smartrecruiters(tmp_path):
+    """SmartRecruiters scanner should parse API response and save jobs."""
+    from unittest.mock import MagicMock, patch
+
+    from db import init_db
+    from scanner import scan_city_smartrecruiters
+
+    db_path = str(tmp_path / "sr_test.db")
+    conn = init_db(db_path)
+
+    fake_resp = MagicMock()
+    fake_resp.json.return_value = {
+        "totalFound": 1,
+        "content": [
+            {
+                "id": "744000119603234",
+                "name": "Program Manager, Community Development",
+                "department": {"label": "Division of Housing and Community Development"},
+                "location": {"city": "Philadelphia", "region": "PA"},
+                "releasedDate": "2026-04-10T12:00:00.000Z",
+                "ref": "https://jobs.smartrecruiters.com/CityofPhiladelphia/744000119603234",
+            }
+        ],
+    }
+
+    with patch("scanner.requests.get", return_value=fake_resp):
+        count = scan_city_smartrecruiters(conn)
+
+    assert count >= 1
+    row = conn.execute("SELECT * FROM jobs WHERE source = 'City Portal'").fetchone()
+    assert row is not None
+    assert "Program Manager" in dict(row)["title"]
+    conn.close()
+
+
+def test_scan_phdc_careers(tmp_path):
+    """PHDC scanner should parse HTML and save job links."""
+    from unittest.mock import MagicMock, patch
+
+    from db import init_db
+    from scanner import scan_phdc_careers
+
+    db_path = str(tmp_path / "phdc_test.db")
+    conn = init_db(db_path)
+
+    fake_resp = MagicMock()
+    fake_resp.text = """
+    <html><body>
+    <h3><a href="https://secure.entertimeonline.com/ta/PHDC.careers?showJob=12345">Housing Program Manager</a></h3>
+    <p><a href="https://secure.entertimeonline.com/ta/PHDC.careers?showJob=67890">
+    <strong>Community Development Analyst</strong></a></p>
+    </body></html>
+    """
+
+    with patch("scanner.requests.get", return_value=fake_resp):
+        count = scan_phdc_careers(conn)
+
+    assert count >= 1
+    rows = conn.execute("SELECT title, source FROM jobs WHERE source = 'PHDC Careers'").fetchall()
+    assert len(rows) >= 1
+    conn.close()
+
+
+def test_parse_pha_snapshot():
+    from scanner import parse_pha_snapshot
+
+    text = """
+    Budget Analyst
+    Job ID
+    "618630"
+    Location
+    Department
+    Budget
+    Posted Date
+    03/25/2026
+
+    Compliance Specialist
+    Job ID
+    "618566"
+    Department
+    Office of Audit and Compliance
+    Posted Date
+    03/02/2026
+    """
+    rows = parse_pha_snapshot(text)
+    assert len(rows) == 2
+    assert rows[0]["title"] == "Budget Analyst"
+    assert rows[0]["company"] == "Philadelphia Housing Authority"
+    assert rows[0]["source"] == "PHA Careers"
+    assert "618630" in rows[0]["url"]
+    assert rows[1]["title"] == "Compliance Specialist"
+
+
+def test_import_pha_jobs(tmp_path, monkeypatch):
+    import scanner as scanner_mod
+    from db import init_db
+
+    snapshot = tmp_path / "pha_careers_snapshot.txt"
+    snapshot.write_text(
+        "\n".join([
+            "Budget Analyst",
+            "Job ID",
+            '"618630"',
+            "Department",
+            "Budget",
+            "Posted Date",
+            "03/25/2026",
+        ]),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(scanner_mod, "PHA_CAREERS_SNAPSHOT", snapshot)
+    db_path = str(tmp_path / "pha_import_test.db")
+    conn = init_db(db_path)
+    try:
+        count = scanner_mod.import_pha_jobs(conn)
+        assert count == 1
+        row = conn.execute(
+            "SELECT title, source FROM jobs WHERE source = 'PHA Careers'"
+        ).fetchone()
+        assert row is not None
+        assert row["title"] == "Budget Analyst"
+    finally:
+        conn.close()
+
+
 def test_import_usajobs_saved_jobs(tmp_path, monkeypatch):
     import scanner as scanner_mod
     from db import init_db

@@ -39,6 +39,14 @@ DAILY_ACTION_DIGEST_SCRIPT: Path = PIPELINE_DIR / "digest.py"
 FOLLOW_UP_REMINDERS_SCRIPT: Path = PIPELINE_DIR / "followups.py"
 GMAIL_TRACKER_SCRIPT: Path = PIPELINE_DIR / "tracker.py"
 USAJOBS_SAVED_JOBS_SNAPSHOT: Path = DATA_DIR / "usajobs_saved_jobs_snapshot.txt"
+PHA_CAREERS_SNAPSHOT: Path = DATA_DIR / "pha_careers_snapshot.txt"
+
+# ---------------------------------------------------------------------------
+# Philadelphia portal URLs (scraped alongside USAJobs/Indeed each pipeline run)
+# ---------------------------------------------------------------------------
+
+SMARTRECRUITERS_URL: str = "https://api.smartrecruiters.com/v1/companies/CityofPhiladelphia/postings"
+PHDC_CAREERS_URL: str = "https://phdcphila.org/about/careers/"
 
 # Ensure data dir exists at import time
 DATA_DIR.mkdir(parents=True, exist_ok=True)
