@@ -58,6 +58,8 @@ def is_target_location(location: str) -> bool:
 
     if "remote" in loc or "telework" in loc:
         return True
+    if "multiple locations" in loc or "location negotiable" in loc:
+        return True
     if "philadelphia" in loc or "philly" in loc:
         return True
     if "new jersey" in loc or ", nj" in loc:

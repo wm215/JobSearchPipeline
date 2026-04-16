@@ -416,6 +416,12 @@ def _score_location(location_lower: str) -> int:
         return 7
     if "remote" in location_lower:
         return 6
+    if "telework" in location_lower:
+        return 6
+    if "multiple locations" in location_lower:
+        return 5
+    if "location negotiable" in location_lower:
+        return 4
     return 0
 
 

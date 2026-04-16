@@ -76,6 +76,8 @@ _TARGET_LOCATION_SQL = """
     OR lower(location) LIKE '%chicago%'
     OR lower(location) LIKE '%remote%'
     OR lower(location) LIKE '%telework%'
+    OR lower(location) LIKE '%multiple locations%'
+    OR lower(location) LIKE '%location negotiable%'
 )
 """
 
@@ -118,10 +120,11 @@ def _query_new_jobs(conn, limit: int = 20) -> list[dict]:
 def _query_recent_research(conn, limit: int = 10) -> list[dict]:
     """Return recent research rows joined with job titles."""
     rows = conn.execute(
-        """
+        f"""
         SELECT j.title, j.company, r.talking_points
         FROM job_research r
         INNER JOIN jobs j ON r.job_id = j.job_id
+        WHERE {_TARGET_LOCATION_SQL}
         ORDER BY r.created_at DESC
         LIMIT ?
         """,
@@ -133,10 +136,11 @@ def _query_recent_research(conn, limit: int = 10) -> list[dict]:
 def _query_cover_letters(conn, limit: int = 10) -> list[dict]:
     """Return recent cover letters joined with job titles."""
     rows = conn.execute(
-        """
+        f"""
         SELECT j.title, j.company, a.cover_letter
         FROM job_applications a
         INNER JOIN jobs j ON a.job_id = j.job_id
+        WHERE {_TARGET_LOCATION_SQL}
         ORDER BY a.created_at DESC
         LIMIT ?
         """,
@@ -164,7 +168,7 @@ def _build_stats(conn) -> dict:
     """Query aggregate stats for the digest stats bar."""
     total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
     new = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE found_date >= datetime('now', '-1 day', 'utc')"
+        f"SELECT COUNT(*) FROM jobs WHERE found_date >= datetime('now', '-1 day', 'utc') AND {_TARGET_LOCATION_SQL}"
     ).fetchone()[0]
     researched = conn.execute("SELECT COUNT(*) FROM job_research").fetchone()[0]
     prepared = conn.execute("SELECT COUNT(*) FROM job_applications").fetchone()[0]

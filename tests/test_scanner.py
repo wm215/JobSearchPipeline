@@ -81,6 +81,8 @@ def test_is_target_location_accepts_core_regions():
     assert is_target_location("Chicago, IL")
     assert is_target_location("Remote")
     assert is_target_location("Telework eligible")
+    assert is_target_location("Multiple Locations")
+    assert is_target_location("Location Negotiable After Selection")
 
 
 def test_is_target_location_rejects_non_targets():

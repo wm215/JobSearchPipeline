@@ -234,6 +234,18 @@ def test_non_target_location_gets_default_score():
     assert result["breakdown"]["location"] == 0
 
 
+def test_multiple_locations_gets_partial_location_score():
+    result = score_job(
+        title="Program Analyst",
+        description="Federal housing program management",
+        company="HUD",
+        location="Multiple Locations",
+        salary_min=100000,
+        salary_max=130000,
+    )
+    assert result["breakdown"]["location"] == 5
+
+
 def test_breakdown_keys_present():
     result = score_job(
         title="Program Analyst",
