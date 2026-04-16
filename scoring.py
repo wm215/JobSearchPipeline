@@ -136,6 +136,56 @@ _DOMAIN_TIER3_KEYWORDS: list[str] = [
     "acquisition",
 ]
 
+# ---------------------------------------------------------------------------
+# LinkedIn bonus data (hardcoded from LinkedIn export, updated Jan 2026)
+# ---------------------------------------------------------------------------
+
+# Company pattern → bonus points (max +10).  Substring match on company name.
+LINKEDIN_CONNECTION_BONUSES: dict[str, int] = {
+    "u.s. department of housing and urban development": 10,
+    "hud": 10,
+    "city of philadelphia": 8,
+    "chicago housing authority": 7,
+    "philadelphia housing authority": 7,
+    "fannie mae": 6,
+    "freddie mac": 6,
+    "illinois department of human services": 6,
+    "cook county government": 6,
+    "illinois department of commerce": 6,
+    "guardian asset management": 5,
+    "pk management": 5,
+    "first allegiance": 5,
+    "asset management specialist": 5,
+    "safeguard properties": 5,
+}
+
+# Skill keyword → bonus points (max +10).  Best single match wins.
+LINKEDIN_ENDORSEMENT_BONUSES: dict[str, int] = {
+    "reo": 8,
+    "hud": 8,
+    "foreclosure": 7,
+    "property management": 7,
+    "real estate": 6,
+    "asset management": 6,
+    "management": 5,
+    "leadership": 5,
+    "customer service": 4,
+    "microsoft office": 3,
+}
+
+# Org pattern → bonus points (max +10).  First substring match wins.
+LINKEDIN_APPLICATION_HISTORY: dict[str, int] = {
+    "chicago housing authority": 10,
+    "u.s. department of housing and urban development": 10,
+    "philadelphia housing authority": 9,
+    "fannie mae": 9,
+    "city of chicago": 8,
+    "city of philadelphia": 8,
+    "experian": 6,
+    "asana": 6,
+}
+
+
 _DOMAIN_TIER4_KEYWORDS: list[str] = [
     "real estate",
     "property management",
@@ -314,6 +364,13 @@ def score_job(
         raw_total = min(raw_total, 50)
         reason = f"Domain gate: domain score {domain} < {DOMAIN_GATE_MIN}"
 
+    # -----------------------------------------------------------------------
+    # Step 9: LinkedIn bonus (connections + endorsements + app history)
+    # -----------------------------------------------------------------------
+    conn_bonus, endorse_bonus, app_bonus = _score_linkedin(company_lower, combined)
+    linkedin_total = min(conn_bonus + endorse_bonus + app_bonus, 30)
+    raw_total += linkedin_total
+
     total_score = min(100, max(0, raw_total))
     status = _decide(total_score)
 
@@ -327,6 +384,9 @@ def score_job(
             "skills": skills,
             "salary": salary,
             "location": loc,
+            "linkedin_connections": conn_bonus,
+            "linkedin_endorsements": endorse_bonus,
+            "linkedin_app_history": app_bonus,
         },
     }
 
@@ -402,6 +462,36 @@ def _score_salary(salary_min: int | None, salary_max: int | None) -> int:
     if salary_max is not None and salary_max >= _SALARY_NEAR:
         return 3
     return 0
+
+
+def _score_linkedin(company_lower: str, combined_lower: str) -> tuple[int, int, int]:
+    """
+    Score LinkedIn bonuses: connections, endorsements, application history.
+
+    Returns (connection_bonus, endorsement_bonus, app_history_bonus).
+    Each is independently capped at 10; the caller caps the sum at 30.
+    """
+    # Connection bonus — first substring match wins
+    conn_bonus = 0
+    for pattern, pts in LINKEDIN_CONNECTION_BONUSES.items():
+        if pattern in company_lower:
+            conn_bonus = pts
+            break
+
+    # Endorsement bonus — best single match across title + description
+    endorse_bonus = 0
+    for skill, pts in LINKEDIN_ENDORSEMENT_BONUSES.items():
+        if skill in combined_lower:
+            endorse_bonus = max(endorse_bonus, pts)
+
+    # Application history bonus — first substring match wins
+    app_bonus = 0
+    for pattern, pts in LINKEDIN_APPLICATION_HISTORY.items():
+        if pattern in company_lower:
+            app_bonus = pts
+            break
+
+    return conn_bonus, endorse_bonus, app_bonus
 
 
 def _score_location(location_lower: str) -> int:

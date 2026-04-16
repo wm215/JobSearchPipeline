@@ -33,9 +33,11 @@ DB_PATH: Path = PIPELINE_DIR / "data" / "job_pipeline.db"
 LOG_PATH: Path = PIPELINE_DIR / "data" / "pipeline.log"
 ERROR_LOG_PATH: Path = PIPELINE_DIR / "data" / "pipeline_errors.log"
 DATA_DIR: Path = PIPELINE_DIR / "data"
-DAILY_ACTION_DIGEST_SCRIPT: Path = Path.home() / "daily_action_digest.py"
-FOLLOW_UP_REMINDERS_SCRIPT: Path = Path.home() / "follow_up_reminders.py"
-GMAIL_TRACKER_SCRIPT: Path = Path.home() / "fully_automated_job_tracker.py"
+# Legacy external script paths — kept for reference but no longer used by run.py.
+# All scripts are now consolidated into this repo as digest.py, followups.py, tracker.py.
+DAILY_ACTION_DIGEST_SCRIPT: Path = PIPELINE_DIR / "digest.py"
+FOLLOW_UP_REMINDERS_SCRIPT: Path = PIPELINE_DIR / "followups.py"
+GMAIL_TRACKER_SCRIPT: Path = PIPELINE_DIR / "tracker.py"
 USAJOBS_SAVED_JOBS_SNAPSHOT: Path = DATA_DIR / "usajobs_saved_jobs_snapshot.txt"
 
 # Ensure data dir exists at import time

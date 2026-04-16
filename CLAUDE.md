@@ -11,10 +11,10 @@ Unified job search automation pipeline: scrapes job listings from USAJobs and In
 | Mode | What it does |
 |------|-------------|
 | `pipeline` | Full 4-stage: scan -> research -> prepare -> network -> email digest |
-| `digest` | Delegates to `~/daily_action_digest.py` (morning briefing email) |
-| `followups` | Delegates to `~/follow_up_reminders.py` (follow-up reminder email) |
+| `digest` | Calls `digest.py` — ADHD-optimized morning briefing email (Gmail + Sheets) |
+| `followups` | Calls `followups.py` — follow-up reminder email (Sheets) |
 | `morning` | Runs digest + followups together |
-| `nightly` | Delegates to `~/fully_automated_job_tracker.py` (Gmail -> Google Sheet) |
+| `nightly` | Calls `tracker.py` — Gmail email extraction -> Google Sheet sync |
 | `all` | pipeline + morning + nightly in sequence |
 
 All modes accept `--dry-run`.
@@ -25,13 +25,17 @@ All modes accept `--dry-run`.
 |------|---------|
 | `config.py` | All settings: locations, salary range, keywords, paths, thresholds |
 | `scanner.py` | Stage 1: USAJobs API + Indeed/Apify scraping + saved-jobs snapshot import |
-| `scoring.py` | Qualification-gated scoring engine (0-100, five dimensions) |
+| `scoring.py` | Qualification-gated scoring engine (0-100) with LinkedIn bonuses |
 | `researcher.py` | Stage 2: generate talking points for top matches |
 | `preparer.py` | Stage 3: generate cover letters |
 | `networker.py` | Stage 4: identify warm leads from LinkedIn connections |
 | `emailer.py` | Build and send HTML digest email |
 | `db.py` | SQLite schema, migrations, CRUD helpers |
 | `run.py` | Orchestrator + digest query helpers |
+| `digest.py` | Morning action digest: starred emails, interviews, job updates, follow-ups |
+| `followups.py` | Follow-up reminders: scans Google Sheet for 14+ day old applications |
+| `tracker.py` | Gmail -> Google Sheet: extracts job applications from emails using OpenAI + regex |
+| `sheets_helper.py` | Shared Google Sheets auth + CRUD helper |
 
 ## Database
 
@@ -47,13 +51,19 @@ Tables: `jobs`, `job_research`, `job_applications`, `warm_leads`, `pipeline_runs
 4. Remote / Telework (score: 6 pts)
 5. Multiple Locations / Location Negotiable (score: 4-5 pts)
 
-## Scoring Dimensions (100 pts total)
+## Scoring Dimensions (100 pts max, base + bonus)
 
+**Base dimensions (100 pts):**
 - Domain (35 pts): HUD/housing tier 1, city/county tier 2, federal tier 3, adjacent tier 4
 - Role (25 pts): strong/partial/weak title keyword match
 - Skills (20 pts): core skill keyword count in description
 - Salary (10 pts): based on advertised range ($100k+ = 10, missing = 5)
 - Location (10 pts): target city matching (see above)
+
+**LinkedIn bonus (up to +30 pts, capped so total never exceeds 100):**
+- Connections (+10 max): HUD=10, City of Philly=8, CHA=7, PHA=7, Fannie=6, etc.
+- Endorsements (+10 max): REO=8, HUD=8, Foreclosure=7, Property Mgmt=7, etc.
+- Application history (+10 max): CHA=10, HUD=10, PHA=9, Fannie=9, etc.
 
 Decision: AUTO_APPLY >= 75 | REVIEW 55-74 | SKIP < 55
 

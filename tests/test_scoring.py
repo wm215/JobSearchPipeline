@@ -267,7 +267,8 @@ def test_breakdown_keys_present():
         salary_min=100000,
         salary_max=130000,
     )
-    for key in ("domain", "role", "skills", "salary", "location"):
+    for key in ("domain", "role", "skills", "salary", "location",
+                "linkedin_connections", "linkedin_endorsements", "linkedin_app_history"):
         assert key in result["breakdown"]
 
 
@@ -313,3 +314,84 @@ def test_skip_status_for_weak_match():
         salary_max=95000,
     )
     assert result["status"] == "SKIP"
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn bonus tests
+# ---------------------------------------------------------------------------
+
+
+def test_linkedin_connection_bonus_hud():
+    """HUD jobs should get +10 connection bonus."""
+    result = score_job(
+        title="Program Analyst",
+        description="Federal program management",
+        company="U.S. Department of Housing and Urban Development",
+        location="Washington, DC",
+        salary_min=100000,
+        salary_max=130000,
+    )
+    assert result["breakdown"]["linkedin_connections"] == 10
+
+
+def test_linkedin_endorsement_bonus():
+    """Jobs mentioning endorsed skills should get endorsement bonus."""
+    result = score_job(
+        title="REO Specialist",
+        description="REO property management and foreclosure disposition",
+        company="Some Agency",
+        location="Philadelphia, PA",
+        salary_min=95000,
+        salary_max=120000,
+    )
+    # "reo" = 8 pts (highest match wins)
+    assert result["breakdown"]["linkedin_endorsements"] == 8
+
+
+def test_linkedin_app_history_bonus():
+    """Jobs at orgs with prior applications should get history bonus."""
+    result = score_job(
+        title="Housing Manager",
+        description="Affordable housing program management",
+        company="Chicago Housing Authority",
+        location="Chicago, IL",
+        salary_min=95000,
+        salary_max=125000,
+    )
+    assert result["breakdown"]["linkedin_app_history"] == 10
+    assert result["breakdown"]["linkedin_connections"] == 7
+
+
+def test_linkedin_bonus_capped_at_30():
+    """Total LinkedIn bonus should not exceed 30 points."""
+    result = score_job(
+        title="Program Analyst",
+        description=(
+            "HUD field office REO foreclosure asset management property management "
+            "program management stakeholder compliance federal policy procurement"
+        ),
+        company="U.S. Department of Housing and Urban Development",
+        location="Philadelphia, PA",
+        salary_min=110000,
+        salary_max=150000,
+    )
+    bd = result["breakdown"]
+    linkedin_sum = bd["linkedin_connections"] + bd["linkedin_endorsements"] + bd["linkedin_app_history"]
+    # Individual values: conn=10, endorse=8 (reo), app_history=10 → 28, under cap
+    assert linkedin_sum <= 30
+    assert result["total_score"] <= 100
+
+
+def test_no_linkedin_bonus_for_unknown_company():
+    """Companies without LinkedIn data should get 0 bonus."""
+    result = score_job(
+        title="Analyst",
+        description="General analysis work",
+        company="Random Unknown Corp",
+        location="Denver, CO",
+        salary_min=95000,
+        salary_max=110000,
+    )
+    assert result["breakdown"]["linkedin_connections"] == 0
+    assert result["breakdown"]["linkedin_endorsements"] == 0
+    assert result["breakdown"]["linkedin_app_history"] == 0

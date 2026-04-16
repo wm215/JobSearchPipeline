@@ -215,40 +215,30 @@ def test_query_new_jobs_includes_remote_location(tmp_path):
 
 
 def test_main_morning_dry_run_returns_zero():
-    """Morning mode dry-run should succeed without executing external scripts."""
-    with mock.patch.object(run_module, "_run_external_script") as runner:
-        exit_code = run_module.main(["--mode", "morning", "--dry-run"])
+    """Morning mode dry-run should succeed without running digest/followups."""
+    exit_code = run_module.main(["--mode", "morning", "--dry-run"])
     assert exit_code == 0
-    runner.assert_not_called()
 
 
 def test_main_digest_dry_run_returns_zero():
-    """Digest mode dry-run should succeed without executing external scripts."""
-    with mock.patch.object(run_module, "_run_external_script") as runner:
-        exit_code = run_module.main(["--mode", "digest", "--dry-run"])
+    """Digest mode dry-run should succeed without running the digest."""
+    exit_code = run_module.main(["--mode", "digest", "--dry-run"])
     assert exit_code == 0
-    runner.assert_not_called()
 
 
 def test_main_followups_dry_run_returns_zero():
-    """Followups mode dry-run should succeed without executing external scripts."""
-    with mock.patch.object(run_module, "_run_external_script") as runner:
-        exit_code = run_module.main(["--mode", "followups", "--dry-run"])
+    """Followups mode dry-run should succeed without running followups."""
+    exit_code = run_module.main(["--mode", "followups", "--dry-run"])
     assert exit_code == 0
-    runner.assert_not_called()
 
 
 def test_main_nightly_passes_tracker_test_limit():
-    """Nightly mode should forward tracker test limit to external script call."""
-    with mock.patch.object(run_module, "_run_external_script") as runner, \
-         mock.patch.object(run_module, "GMAIL_TRACKER_SCRIPT", pathlib.Path("/tmp/tracker.py")):
+    """Nightly mode should forward tracker test limit to tracker.main()."""
+    tracker_mock = mock.MagicMock()
+    with mock.patch.dict("sys.modules", {"tracker": tracker_mock}):
         exit_code = run_module.main(["--mode", "nightly", "--tracker-test-limit", "20"])
     assert exit_code == 0
-    runner.assert_called_once_with(
-        pathlib.Path("/tmp/tracker.py"),
-        "fully_automated_job_tracker",
-        ["--test", "20"],
-    )
+    tracker_mock.main.assert_called_once_with(["--test", "20"])
 
 
 def test_query_new_jobs_includes_washington_dc(tmp_path):

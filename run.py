@@ -16,7 +16,6 @@ Usage:
 import argparse
 import logging
 import os
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,11 +24,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import (
-    DAILY_ACTION_DIGEST_SCRIPT,
     DB_PATH,
     ERROR_LOG_PATH,
-    FOLLOW_UP_REMINDERS_SCRIPT,
-    GMAIL_TRACKER_SCRIPT,
     LOG_PATH,
 )
 from db import (
@@ -308,79 +304,42 @@ def run_pipeline() -> int:
             conn.close()
 
 
-def _tail_text(text: str, lines: int = 40) -> str:
-    parts = text.strip().splitlines()
-    if not parts:
-        return ""
-    return "\n".join(parts[-lines:])
-
-
-def _run_external_script(script_path: Path, stage_name: str, args: list[str] | None = None) -> None:
-    if not script_path.exists():
-        raise FileNotFoundError(f"{stage_name} script not found: {script_path}")
-
-    cmd = [sys.executable, str(script_path)]
-    if args:
-        cmd.extend(args)
-
-    log.info("Running %s: %s", stage_name, " ".join(cmd))
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    if result.stdout and result.stdout.strip():
-        log.info("%s output:\n%s", stage_name, _tail_text(result.stdout))
-    if result.returncode != 0:
-        stderr = _tail_text(result.stderr) or _tail_text(result.stdout)
-        raise RuntimeError(f"{stage_name} failed with exit code {result.returncode}: {stderr}")
-
-
-def _run_task_bundle(tasks: list[tuple[str, Path, list[str]]], dry_run: bool = False) -> int:
-    for name, path, args in tasks:
-        if dry_run:
-            log.info("[dry-run] Would run %s: %s %s", name, sys.executable, path)
-            continue
-        _run_external_script(path, name, args)
+def run_digest_only(dry_run: bool = False) -> int:
+    if dry_run:
+        log.info("[dry-run] Would run daily_action_digest")
+        return 0
+    import digest
+    log.info("Running daily_action_digest")
+    digest.main()
     return 0
 
 
-def run_digest_only(dry_run: bool = False) -> int:
-    return _run_task_bundle(
-        [("daily_action_digest", DAILY_ACTION_DIGEST_SCRIPT, [])],
-        dry_run=dry_run,
-    )
-
-
 def run_followups_only(dry_run: bool = False) -> int:
-    return _run_task_bundle(
-        [("follow_up_reminders", FOLLOW_UP_REMINDERS_SCRIPT, [])],
-        dry_run=dry_run,
-    )
+    if dry_run:
+        log.info("[dry-run] Would run follow_up_reminders")
+        return 0
+    import followups
+    log.info("Running follow_up_reminders")
+    followups.main()
+    return 0
 
 
 def run_morning_bundle(dry_run: bool = False) -> int:
-    return _run_task_bundle(
-        [
-            ("daily_action_digest", DAILY_ACTION_DIGEST_SCRIPT, []),
-            ("follow_up_reminders", FOLLOW_UP_REMINDERS_SCRIPT, []),
-        ],
-        dry_run=dry_run,
-    )
+    run_digest_only(dry_run=dry_run)
+    run_followups_only(dry_run=dry_run)
+    return 0
 
 
 def run_nightly_bundle(dry_run: bool = False, tracker_test_limit: int | None = None) -> int:
-    args: list[str] = []
-    if tracker_test_limit is not None:
-        args = ["--test", str(tracker_test_limit)]
-
     if dry_run:
-        log.info("[dry-run] Would run gmail tracker: %s %s %s", sys.executable, GMAIL_TRACKER_SCRIPT, " ".join(args))
+        log.info("[dry-run] Would run gmail tracker")
         return 0
-
-    _run_external_script(GMAIL_TRACKER_SCRIPT, "fully_automated_job_tracker", args)
+    import tracker
+    argv: list[str] = []
+    if tracker_test_limit is not None:
+        argv = ["--test", str(tracker_test_limit)]
+    log.info("Running fully_automated_job_tracker%s", f" (test={tracker_test_limit})" if tracker_test_limit else "")
+    tracker.main(argv or None)
     return 0
 
 
