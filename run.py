@@ -170,8 +170,24 @@ def _build_stats(conn) -> dict:
     new = conn.execute(
         f"SELECT COUNT(*) FROM jobs WHERE found_date >= datetime('now', '-1 day', 'utc') AND {_TARGET_LOCATION_SQL}"
     ).fetchone()[0]
-    researched = conn.execute("SELECT COUNT(*) FROM job_research").fetchone()[0]
-    prepared = conn.execute("SELECT COUNT(*) FROM job_applications").fetchone()[0]
+    researched = conn.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM job_research r
+        INNER JOIN jobs j ON r.job_id = j.job_id
+        WHERE r.created_at >= datetime('now', '-1 day', 'utc')
+          AND {_TARGET_LOCATION_SQL}
+        """
+    ).fetchone()[0]
+    prepared = conn.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM job_applications a
+        INNER JOIN jobs j ON a.job_id = j.job_id
+        WHERE a.created_at >= datetime('now', '-1 day', 'utc')
+          AND {_TARGET_LOCATION_SQL}
+        """
+    ).fetchone()[0]
     leads = conn.execute(
         "SELECT COUNT(*) FROM warm_leads WHERE outreach_sent = 0"
     ).fetchone()[0]
