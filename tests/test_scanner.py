@@ -283,3 +283,61 @@ def test_scan_usajobs_http_error(tmp_path):
 
     assert count == 0
     conn.close()
+
+
+def test_parse_usajobs_saved_snapshot():
+    from scanner import parse_usajobs_saved_snapshot
+
+    text = """
+    Contract Specialist
+    Accepting applications
+    Public Buildings Service
+    Multiple Locations
+    Closes 4/15/2026
+
+    Supervisory Grants Management Specialist
+    Accepting applications
+    Environmental Protection Agency
+    Philadelphia, Pennsylvania
+    Closes 4/20/2026
+    """
+    rows = parse_usajobs_saved_snapshot(text)
+    assert len(rows) == 2
+    assert rows[0]["title"] == "Contract Specialist"
+    assert rows[0]["company"] == "Public Buildings Service"
+    assert rows[0]["location"] == "Multiple Locations"
+    assert rows[0]["source"] == "USAJobs Saved"
+
+
+def test_import_usajobs_saved_jobs(tmp_path, monkeypatch):
+    import scanner as scanner_mod
+    from db import init_db
+
+    snapshot = tmp_path / "usajobs_saved_jobs_snapshot.txt"
+    snapshot.write_text(
+        "\n".join(
+            [
+                "Contract Specialist",
+                "Accepting applications",
+                "Public Buildings Service",
+                "Multiple Locations",
+                "Closes 4/15/2026",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(scanner_mod, "USAJOBS_SAVED_JOBS_SNAPSHOT", snapshot)
+    db_path = str(tmp_path / "import_saved_test.db")
+    conn = init_db(db_path)
+    try:
+        count = scanner_mod.import_usajobs_saved_jobs(conn)
+        assert count == 1
+        row = conn.execute(
+            "SELECT title, company, source FROM jobs WHERE source = 'USAJobs Saved'"
+        ).fetchone()
+        assert row is not None
+        assert row["title"] == "Contract Specialist"
+        assert row["company"] == "Public Buildings Service"
+    finally:
+        conn.close()

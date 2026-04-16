@@ -36,6 +36,7 @@ DATA_DIR: Path = PIPELINE_DIR / "data"
 DAILY_ACTION_DIGEST_SCRIPT: Path = Path.home() / "daily_action_digest.py"
 FOLLOW_UP_REMINDERS_SCRIPT: Path = Path.home() / "follow_up_reminders.py"
 GMAIL_TRACKER_SCRIPT: Path = Path.home() / "fully_automated_job_tracker.py"
+USAJOBS_SAVED_JOBS_SNAPSHOT: Path = DATA_DIR / "usajobs_saved_jobs_snapshot.txt"
 
 # Ensure data dir exists at import time
 DATA_DIR.mkdir(parents=True, exist_ok=True)

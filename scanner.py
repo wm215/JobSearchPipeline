@@ -22,6 +22,7 @@ from config import (
     PROFILE,
     USAJOBS_API_KEY,
     USAJOBS_EMAIL,
+    USAJOBS_SAVED_JOBS_SNAPSHOT,
 )
 from db import generate_job_id, save_job
 from scoring import score_job
@@ -216,6 +217,96 @@ def parse_indeed_result(item: dict) -> dict:
         "salary_max": salary_max,
         "sector": "Private",
     }
+
+
+def parse_usajobs_saved_snapshot(text: str) -> list[dict]:
+    """
+    Parse plain-text USAJOBS saved-jobs page content into normalized job dicts.
+
+    Expected repeating block shape:
+        <title>
+        Accepting applications
+        <agency/company>
+        <location>
+        Closes <date>
+    """
+    rows: list[dict] = []
+    if not text:
+        return rows
+
+    # Keep ordering but drop blank lines.
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    for i, line in enumerate(lines):
+        if line.lower() != "accepting applications":
+            continue
+        if i < 1 or i + 2 >= len(lines):
+            continue
+
+        title = lines[i - 1]
+        company = lines[i + 1]
+        location = lines[i + 2]
+
+        # Optional "Closes MM/DD/YYYY" line
+        posted_date = ""
+        if i + 3 < len(lines) and lines[i + 3].lower().startswith("closes "):
+            posted_date = lines[i + 3].replace("Closes ", "", 1).strip()
+
+        rows.append(
+            {
+                "title": title,
+                "company": company,
+                "location": location,
+                "url": f"usajobs-saved://{generate_job_id(title, company, location, posted_date)}",
+                "source": "USAJobs Saved",
+                "description": "",
+                "posted_date": posted_date,
+                "salary_min": None,
+                "salary_max": None,
+                "sector": "Federal",
+            }
+        )
+    return rows
+
+
+def import_usajobs_saved_jobs(conn: sqlite3.Connection) -> int:
+    """
+    Import user-saved USAJobs postings from snapshot text file, if present.
+    """
+    if not USAJOBS_SAVED_JOBS_SNAPSHOT.exists():
+        return 0
+
+    try:
+        text = USAJOBS_SAVED_JOBS_SNAPSHOT.read_text(encoding="utf-8")
+    except OSError as exc:
+        log.warning("Could not read USAJobs saved-jobs snapshot: %s", exc)
+        return 0
+
+    parsed = parse_usajobs_saved_snapshot(text)
+    saved = 0
+    for job in parsed:
+        if not is_target_location(job["location"]):
+            continue
+        result = score_job(
+            job["title"],
+            job["description"],
+            job["company"],
+            job["location"],
+            job["salary_min"],
+            job["salary_max"],
+        )
+        if result["total_score"] <= 0:
+            continue
+        job["match_score"] = result["total_score"]
+        job["score_breakdown"] = result["breakdown"]
+        job["job_id"] = generate_job_id(
+            job["title"], job["company"], job["location"], job["url"]
+        )
+        if save_job(conn, job):
+            saved += 1
+
+    if parsed:
+        log.info("USAJobs saved snapshot imported: %d parsed, %d new", len(parsed), saved)
+    return saved
 
 
 # ---------------------------------------------------------------------------
@@ -434,6 +525,11 @@ def run_scan(conn: sqlite3.Connection) -> int:
     indeed_keywords = INDEED_KEYWORDS[:5]
 
     total = 0
+
+    imported_saved = import_usajobs_saved_jobs(conn)
+    if imported_saved:
+        log.info("Imported %d jobs from USAJobs saved snapshot", imported_saved)
+        total += imported_saved
 
     log.info("Starting USAJobs scan (%d keywords × %d locations)", len(_USAJOBS_KEYWORDS), len(locations))
     for keyword in _USAJOBS_KEYWORDS:

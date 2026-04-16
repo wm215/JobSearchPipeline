@@ -6,6 +6,7 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 data/*.log
+data/usajobs_saved_jobs_snapshot.txt
 __pycache__/
 *.pyc
 .pytest_cache/

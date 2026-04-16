@@ -77,6 +77,7 @@ def test_pipeline_runs_without_api_keys(tmp_path):
 
 def test_pipeline_scan_returns_zero_without_keys(tmp_path):
     """run_scan with no API keys should return 0 (no network calls)."""
+    import pathlib
     from db import init_db
     from scanner import run_scan
 
@@ -84,7 +85,8 @@ def test_pipeline_scan_returns_zero_without_keys(tmp_path):
     conn = init_db(db_path)
     try:
         with mock.patch("scanner.USAJOBS_API_KEY", ""), \
-             mock.patch("scanner.APIFY_API_TOKEN", ""):
+             mock.patch("scanner.APIFY_API_TOKEN", ""), \
+             mock.patch("scanner.USAJOBS_SAVED_JOBS_SNAPSHOT", pathlib.Path(tmp_path / "missing_saved_jobs.txt")):
             count = run_scan(conn)
         assert count == 0
     finally:
