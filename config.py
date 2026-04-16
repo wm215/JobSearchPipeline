@@ -27,7 +27,8 @@ APIFY_API_TOKEN: str = os.getenv("APIFY_API_TOKEN", os.getenv("APIFY_TOKEN", "")
 # Paths
 # ---------------------------------------------------------------------------
 
-PIPELINE_DIR: Path = Path.home() / "JobSearchPipeline"
+# Keep pipeline data/logs colocated with the active repository checkout.
+PIPELINE_DIR: Path = Path(__file__).resolve().parent
 DB_PATH: Path = PIPELINE_DIR / "data" / "job_pipeline.db"
 LOG_PATH: Path = PIPELINE_DIR / "data" / "pipeline.log"
 ERROR_LOG_PATH: Path = PIPELINE_DIR / "data" / "pipeline_errors.log"
