@@ -79,6 +79,8 @@ def test_is_target_location_accepts_core_regions():
     assert is_target_location("Camden, NJ")
     assert is_target_location("Dover, DE")
     assert is_target_location("Chicago, IL")
+    assert is_target_location("Remote")
+    assert is_target_location("Telework eligible")
 
 
 def test_is_target_location_rejects_non_targets():

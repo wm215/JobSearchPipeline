@@ -189,6 +189,29 @@ def test_build_stats_returns_expected_keys(tmp_path):
         assert isinstance(v, int)
 
 
+def test_query_new_jobs_includes_remote_location(tmp_path):
+    """_query_new_jobs should include remote jobs in digest candidates."""
+    from db import init_db
+
+    db_path = str(tmp_path / "remote_jobs_test.db")
+    conn = init_db(db_path)
+    conn.execute(
+        """
+        INSERT INTO jobs (job_id, title, company, location, url, source,
+                          match_score, found_date, applied)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '-1 hour', 'utc'), 0)
+        """,
+        ("job-remote-1", "Program Analyst", "HUD", "Remote",
+         "https://usajobs.gov/remote", "USAJobs", 90),
+    )
+    conn.commit()
+
+    result = run_module._query_new_jobs(conn)
+    conn.close()
+
+    assert any(r["location"] == "Remote" for r in result)
+
+
 def test_main_morning_dry_run_returns_zero():
     """Morning mode dry-run should succeed without executing external scripts."""
     with mock.patch.object(run_module, "_run_external_script") as runner:
