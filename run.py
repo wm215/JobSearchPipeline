@@ -73,6 +73,8 @@ _TARGET_LOCATION_SQL = """
     OR lower(location) LIKE '%, nj%'
     OR lower(location) LIKE '%delaware%'
     OR lower(location) LIKE '%, de%'
+    OR lower(location) LIKE '%washington%dc%'
+    OR lower(location) LIKE '%washington%d.c.%'
     OR lower(location) LIKE '%chicago%'
     OR lower(location) LIKE '%remote%'
     OR lower(location) LIKE '%telework%'

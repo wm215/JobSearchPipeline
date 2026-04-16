@@ -85,11 +85,29 @@ def test_is_target_location_accepts_core_regions():
     assert is_target_location("Location Negotiable After Selection")
 
 
+def test_is_target_location_accepts_washington_dc():
+    from scanner import is_target_location
+
+    assert is_target_location("Washington, DC")
+    assert is_target_location("Washington, D.C.")
+
+
 def test_is_target_location_rejects_non_targets():
     from scanner import is_target_location
 
-    assert not is_target_location("Washington, DC")
     assert not is_target_location("Arlington, VA")
+    assert not is_target_location("Denver, CO")
+
+
+def test_is_target_location_rejects_chicago_suburbs():
+    from scanner import is_target_location
+
+    assert not is_target_location("North Chicago, IL")
+    assert not is_target_location("West Chicago, IL")
+    assert not is_target_location("Chicago Heights, IL")
+    assert not is_target_location("East Chicago, IN")
+    # Real Chicago should still pass
+    assert is_target_location("Chicago, IL")
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +325,40 @@ def test_parse_usajobs_saved_snapshot():
     assert rows[0]["company"] == "Public Buildings Service"
     assert rows[0]["location"] == "Multiple Locations"
     assert rows[0]["source"] == "USAJobs Saved"
+
+
+def test_parse_usajobs_saved_snapshot_with_url():
+    from scanner import parse_usajobs_saved_snapshot
+
+    text = """
+    Program Analyst GS-13
+    Accepting applications
+    Department of Housing and Urban Development
+    Washington, DC
+    Closes 5/01/2026
+    https://www.usajobs.gov/job/828364200
+    """
+    rows = parse_usajobs_saved_snapshot(text)
+    assert len(rows) == 1
+    assert rows[0]["url"] == "https://www.usajobs.gov/job/828364200"
+    # GS-13 in title should extract salary
+    assert rows[0]["salary_min"] == 99_296
+    assert rows[0]["salary_max"] == 129_155
+
+
+def test_parse_usajobs_saved_snapshot_no_url_gets_placeholder():
+    from scanner import parse_usajobs_saved_snapshot
+
+    text = """
+    Contract Specialist
+    Accepting applications
+    Public Buildings Service
+    Chicago, IL
+    Closes 4/15/2026
+    """
+    rows = parse_usajobs_saved_snapshot(text)
+    assert len(rows) == 1
+    assert rows[0]["url"].startswith("usajobs-saved://")
 
 
 def test_import_usajobs_saved_jobs(tmp_path, monkeypatch):

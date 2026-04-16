@@ -51,6 +51,9 @@ _SALARY_K_RE = re.compile(r"\$\s*([\d]+)k\b", re.IGNORECASE)
 _GS_GRADE_RE = re.compile(r"\bgs[- ](\d{1,2})\b", re.IGNORECASE)
 
 
+_CHICAGO_SUBURBS = {"north chicago", "west chicago", "chicago heights", "east chicago"}
+
+
 def is_target_location(location: str) -> bool:
     """Return True when *location* is in the active target geography."""
     loc = (location or "").lower()
@@ -67,7 +70,13 @@ def is_target_location(location: str) -> bool:
         return True
     if "delaware" in loc or ", de" in loc:
         return True
+    if "washington" in loc and ("dc" in loc or "d.c." in loc):
+        return True
     if "chicago" in loc:
+        # Reject known suburbs that are distinct cities, not Chicago proper
+        for suburb in _CHICAGO_SUBURBS:
+            if suburb in loc:
+                return False
         return True
     return False
 
@@ -229,6 +238,10 @@ def parse_usajobs_saved_snapshot(text: str) -> list[dict]:
         <agency/company>
         <location>
         Closes <date>
+        https://www.usajobs.gov/job/...   (optional URL line)
+
+    If a URL line is present (starts with http), it becomes the job URL.
+    Otherwise a placeholder ``usajobs-saved://<hash>`` is used.
     """
     rows: list[dict] = []
     if not text:
@@ -248,20 +261,33 @@ def parse_usajobs_saved_snapshot(text: str) -> list[dict]:
 
         # Optional "Closes MM/DD/YYYY" line
         posted_date = ""
-        if i + 3 < len(lines) and lines[i + 3].lower().startswith("closes "):
-            posted_date = lines[i + 3].replace("Closes ", "", 1).strip()
+        next_idx = i + 3
+        if next_idx < len(lines) and lines[next_idx].lower().startswith("closes "):
+            posted_date = lines[next_idx].replace("Closes ", "", 1).strip()
+            next_idx += 1
+
+        # Optional URL line (starts with http)
+        url = ""
+        if next_idx < len(lines) and lines[next_idx].lower().startswith("http"):
+            url = lines[next_idx]
+
+        if not url:
+            url = f"usajobs-saved://{generate_job_id(title, company, location, posted_date)}"
+
+        # Try to extract salary from the title (e.g. "GS-13" in the title)
+        salary_min, salary_max = extract_salary_from_text(title)
 
         rows.append(
             {
                 "title": title,
                 "company": company,
                 "location": location,
-                "url": f"usajobs-saved://{generate_job_id(title, company, location, posted_date)}",
+                "url": url,
                 "source": "USAJobs Saved",
                 "description": "",
                 "posted_date": posted_date,
-                "salary_min": None,
-                "salary_max": None,
+                "salary_min": salary_min,
+                "salary_max": salary_max,
                 "sector": "Federal",
             }
         )

@@ -222,6 +222,18 @@ def test_remote_job_gets_reduced_location_score():
     assert result["breakdown"]["location"] == 6
 
 
+def test_washington_dc_gets_location_score():
+    result = score_job(
+        title="Program Analyst",
+        description="Federal housing program management",
+        company="HUD",
+        location="Washington, DC",
+        salary_min=100000,
+        salary_max=130000,
+    )
+    assert result["breakdown"]["location"] == 8
+
+
 def test_non_target_location_gets_default_score():
     result = score_job(
         title="Program Analyst",

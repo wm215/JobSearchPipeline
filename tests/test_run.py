@@ -249,3 +249,26 @@ def test_main_nightly_passes_tracker_test_limit():
         "fully_automated_job_tracker",
         ["--test", "20"],
     )
+
+
+def test_query_new_jobs_includes_washington_dc(tmp_path):
+    """_query_new_jobs should include Washington DC jobs in digest."""
+    from db import init_db
+
+    db_path = str(tmp_path / "dc_jobs_test.db")
+    conn = init_db(db_path)
+    conn.execute(
+        """
+        INSERT INTO jobs (job_id, title, company, location, url, source,
+                          match_score, found_date, applied)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '-1 hour', 'utc'), 0)
+        """,
+        ("job-dc-1", "Program Analyst", "HUD", "Washington, DC",
+         "https://usajobs.gov/dc", "USAJobs", 90),
+    )
+    conn.commit()
+
+    result = run_module._query_new_jobs(conn)
+    conn.close()
+
+    assert any(r["location"] == "Washington, DC" for r in result)

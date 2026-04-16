@@ -54,6 +54,7 @@ PROFILE: dict = {
         "Philadelphia PA",
         "New Jersey",
         "Delaware",
+        "Washington DC",
         "Chicago IL",
     ],
     "salary_min": 90_000,

@@ -412,6 +412,8 @@ def _score_location(location_lower: str) -> int:
         return 10
     if "delaware" in location_lower or ", de" in location_lower:
         return 10
+    if "washington" in location_lower and ("dc" in location_lower or "d.c." in location_lower):
+        return 8
     if "chicago" in location_lower:
         return 7
     if "remote" in location_lower:
