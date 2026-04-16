@@ -1,24 +1,37 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """
 run.py — Single entry point for the JobSearchPipeline.
 
-Runs all four stages in sequence, builds an email digest, and marks the
-pipeline run complete. On any failure, logs the error, sends a failure email,
-and writes to ERROR_LOG_PATH.
+Runs pipeline stages and related automation tasks from one command.
 
 Usage:
-    python3 run.py
+    python3 run.py --mode pipeline
+    python3 run.py --mode morning
+    python3 run.py --mode nightly
+    python3 run.py --mode all
 """
 
+import argparse
 import logging
 import os
+import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 # Ensure the package root is on sys.path when invoked from cron or another dir
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from config import DB_PATH, ERROR_LOG_PATH, LOG_PATH
+from config import (
+    DAILY_ACTION_DIGEST_SCRIPT,
+    DB_PATH,
+    ERROR_LOG_PATH,
+    FOLLOW_UP_REMINDERS_SCRIPT,
+    GMAIL_TRACKER_SCRIPT,
+    LOG_PATH,
+)
 from db import (
     complete_pipeline_run,
     fail_pipeline_run,
@@ -162,7 +175,7 @@ def _build_stats(conn) -> dict:
 # Main pipeline
 # ---------------------------------------------------------------------------
 
-def main() -> int:
+def run_pipeline() -> int:
     """
     Run the full pipeline: scan → research → prepare → network → email.
 
@@ -254,6 +267,118 @@ def main() -> int:
     finally:
         if conn:
             conn.close()
+
+
+def _tail_text(text: str, lines: int = 40) -> str:
+    parts = text.strip().splitlines()
+    if not parts:
+        return ""
+    return "\n".join(parts[-lines:])
+
+
+def _run_external_script(script_path: Path, stage_name: str, args: list[str] | None = None) -> None:
+    if not script_path.exists():
+        raise FileNotFoundError(f"{stage_name} script not found: {script_path}")
+
+    cmd = [sys.executable, str(script_path)]
+    if args:
+        cmd.extend(args)
+
+    log.info("Running %s: %s", stage_name, " ".join(cmd))
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    if result.stdout and result.stdout.strip():
+        log.info("%s output:\n%s", stage_name, _tail_text(result.stdout))
+    if result.returncode != 0:
+        stderr = _tail_text(result.stderr) or _tail_text(result.stdout)
+        raise RuntimeError(f"{stage_name} failed with exit code {result.returncode}: {stderr}")
+
+
+def run_morning_bundle(dry_run: bool = False) -> int:
+    tasks = [
+        ("daily_action_digest", DAILY_ACTION_DIGEST_SCRIPT, []),
+        ("follow_up_reminders", FOLLOW_UP_REMINDERS_SCRIPT, []),
+    ]
+    for name, path, args in tasks:
+        if dry_run:
+            log.info("[dry-run] Would run %s: %s %s", name, sys.executable, path)
+            continue
+        _run_external_script(path, name, args)
+    return 0
+
+
+def run_nightly_bundle(dry_run: bool = False, tracker_test_limit: int | None = None) -> int:
+    args: list[str] = []
+    if tracker_test_limit is not None:
+        args = ["--test", str(tracker_test_limit)]
+
+    if dry_run:
+        log.info("[dry-run] Would run gmail tracker: %s %s %s", sys.executable, GMAIL_TRACKER_SCRIPT, " ".join(args))
+        return 0
+
+    _run_external_script(GMAIL_TRACKER_SCRIPT, "fully_automated_job_tracker", args)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Unified JobSearchPipeline runner")
+    parser.add_argument(
+        "--mode",
+        choices=["pipeline", "morning", "nightly", "all"],
+        default="pipeline",
+        help="Choose which automation bundle to run",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what would run for morning/nightly bundles without executing scripts",
+    )
+    parser.add_argument(
+        "--tracker-test-limit",
+        type=int,
+        default=None,
+        help="When mode is nightly/all, pass --test N to fully_automated_job_tracker.py",
+    )
+    args = parser.parse_args(argv)
+
+    if args.mode == "pipeline":
+        return run_pipeline()
+
+    if args.mode == "morning":
+        try:
+            return run_morning_bundle(dry_run=args.dry_run)
+        except Exception as exc:
+            log.error("Morning bundle failed: %s", exc, exc_info=True)
+            return 1
+
+    if args.mode == "nightly":
+        try:
+            return run_nightly_bundle(
+                dry_run=args.dry_run,
+                tracker_test_limit=args.tracker_test_limit,
+            )
+        except Exception as exc:
+            log.error("Nightly bundle failed: %s", exc, exc_info=True)
+            return 1
+
+    # mode == "all"
+    if run_pipeline() != 0:
+        return 1
+    try:
+        run_morning_bundle(dry_run=args.dry_run)
+        run_nightly_bundle(
+            dry_run=args.dry_run,
+            tracker_test_limit=args.tracker_test_limit,
+        )
+        return 0
+    except Exception as exc:
+        log.error("Unified all-mode failed: %s", exc, exc_info=True)
+        return 1
 
 
 if __name__ == "__main__":

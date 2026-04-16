@@ -61,7 +61,7 @@ def _run_main(tmp_path, extra_patches=None):
 
     with mock.patch.multiple(run_module, **{k: v for k, v in patch_kwargs.items()}), \
          mock.patch("run.logging.basicConfig"):
-        return run_module.main()
+        return run_module.main([])
 
 
 # ---------------------------------------------------------------------------
@@ -187,3 +187,24 @@ def test_build_stats_returns_expected_keys(tmp_path):
     assert required_keys.issubset(stats.keys())
     for v in stats.values():
         assert isinstance(v, int)
+
+
+def test_main_morning_dry_run_returns_zero():
+    """Morning mode dry-run should succeed without executing external scripts."""
+    with mock.patch.object(run_module, "_run_external_script") as runner:
+        exit_code = run_module.main(["--mode", "morning", "--dry-run"])
+    assert exit_code == 0
+    runner.assert_not_called()
+
+
+def test_main_nightly_passes_tracker_test_limit():
+    """Nightly mode should forward tracker test limit to external script call."""
+    with mock.patch.object(run_module, "_run_external_script") as runner, \
+         mock.patch.object(run_module, "GMAIL_TRACKER_SCRIPT", pathlib.Path("/tmp/tracker.py")):
+        exit_code = run_module.main(["--mode", "nightly", "--tracker-test-limit", "20"])
+    assert exit_code == 0
+    runner.assert_called_once_with(
+        pathlib.Path("/tmp/tracker.py"),
+        "fully_automated_job_tracker",
+        ["--test", "20"],
+    )

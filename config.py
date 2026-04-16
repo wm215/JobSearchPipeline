@@ -32,6 +32,9 @@ DB_PATH: Path = PIPELINE_DIR / "data" / "job_pipeline.db"
 LOG_PATH: Path = PIPELINE_DIR / "data" / "pipeline.log"
 ERROR_LOG_PATH: Path = PIPELINE_DIR / "data" / "pipeline_errors.log"
 DATA_DIR: Path = PIPELINE_DIR / "data"
+DAILY_ACTION_DIGEST_SCRIPT: Path = Path.home() / "daily_action_digest.py"
+FOLLOW_UP_REMINDERS_SCRIPT: Path = Path.home() / "follow_up_reminders.py"
+GMAIL_TRACKER_SCRIPT: Path = Path.home() / "fully_automated_job_tracker.py"
 
 # Ensure data dir exists at import time
 DATA_DIR.mkdir(parents=True, exist_ok=True)
