@@ -48,6 +48,31 @@ PHA_CAREERS_SNAPSHOT: Path = DATA_DIR / "pha_careers_snapshot.txt"
 SMARTRECRUITERS_URL: str = "https://api.smartrecruiters.com/v1/companies/CityofPhiladelphia/postings"
 PHDC_CAREERS_URL: str = "https://phdcphila.org/about/careers/"
 
+# ---------------------------------------------------------------------------
+# Targeting strategy
+# ---------------------------------------------------------------------------
+
+# Primary location priority order for search loops.
+TARGET_REGIONS: list[str] = [
+    "Philadelphia PA",
+    "New Jersey",
+    "Delaware",
+    "Chicago IL",
+]
+
+# Keep DC optional so targeting can be changed with one flag.
+INCLUDE_WASHINGTON_DC: bool = os.getenv("INCLUDE_WASHINGTON_DC", "0") == "1"
+
+# Candidate scoring + apply queue thresholds.
+APPLY_NOW_THRESHOLD: int = int(os.getenv("APPLY_NOW_THRESHOLD", "75"))
+
+# Attempt to refresh the USAJobs saved-jobs snapshot from clipboard text.
+AUTO_REFRESH_SAVED_JOBS_FROM_CLIPBOARD: bool = os.getenv(
+    "AUTO_REFRESH_SAVED_JOBS_FROM_CLIPBOARD",
+    "1",
+) == "1"
+AUTO_REFRESH_MIN_SAVED_ROWS: int = int(os.getenv("AUTO_REFRESH_MIN_SAVED_ROWS", "3"))
+
 # Ensure data dir exists at import time
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -60,13 +85,7 @@ PROFILE: dict = {
     "email": EMAIL_USER,
     "current_title": "Program Analyst",
     "experience_years": 10,
-    "locations": [
-        "Philadelphia PA",
-        "New Jersey",
-        "Delaware",
-        "Washington DC",
-        "Chicago IL",
-    ],
+    "locations": TARGET_REGIONS + (["Washington DC"] if INCLUDE_WASHINGTON_DC else []),
     "salary_min": 90_000,
     "salary_max": 200_000,
     "resume_metrics": {
@@ -110,7 +129,12 @@ USAJOBS_SERIES: list[str] = [
 # Indeed / Apify
 # ---------------------------------------------------------------------------
 
-INDEED_ACTOR: str = "valig/indeed-jobs-scraper"
+INDEED_ACTOR: str = os.getenv("INDEED_ACTOR", "valig/indeed-jobs-scraper")
+INDEED_ACTOR_FALLBACKS: list[str] = [
+    a.strip()
+    for a in os.getenv("INDEED_ACTOR_FALLBACKS", "").split(",")
+    if a.strip()
+]
 
 INDEED_KEYWORDS: list[str] = [
     "Program Analyst",
@@ -122,6 +146,15 @@ INDEED_KEYWORDS: list[str] = [
     "Compliance Manager",
     "Government Relations",
 ]
+
+# ---------------------------------------------------------------------------
+# python-jobspy (replaces Apify for Indeed + adds LinkedIn scraping)
+# ---------------------------------------------------------------------------
+
+JOBSPY_SITES: list[str] = ["indeed", "linkedin"]
+JOBSPY_RESULTS_WANTED: int = 50      # per keyword/location search
+JOBSPY_HOURS_OLD: int = 168          # 7 days
+JOBSPY_COUNTRY: str = "USA"
 
 # ---------------------------------------------------------------------------
 # Disqualification phrases (case-insensitive substring match on job title)

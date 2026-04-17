@@ -10,15 +10,24 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
+import subprocess
 import time
-from typing import Optional
+from typing import Any, Optional
 
 import requests
 
 from config import (
     APIFY_API_TOKEN,
+    AUTO_REFRESH_MIN_SAVED_ROWS,
+    AUTO_REFRESH_SAVED_JOBS_FROM_CLIPBOARD,
     INDEED_ACTOR,
+    INDEED_ACTOR_FALLBACKS,
     INDEED_KEYWORDS,
+    INCLUDE_WASHINGTON_DC,
+    JOBSPY_COUNTRY,
+    JOBSPY_HOURS_OLD,
+    JOBSPY_RESULTS_WANTED,
+    JOBSPY_SITES,
     PHA_CAREERS_SNAPSHOT,
     PHDC_CAREERS_URL,
     PROFILE,
@@ -31,6 +40,16 @@ from db import generate_job_id, save_job
 from scoring import score_job
 
 log = logging.getLogger("pipeline.scanner")
+
+_LAST_SCAN_META: dict[str, Any] = {
+    "source_health": "not-run",
+    "indeed_attempts": 0,
+    "indeed_successes": 0,
+    "indeed_errors": {},
+    "excluded_counts": {},
+    "excluded_samples": [],
+}
+_SCAN_CONTEXT: dict[str, Any] | None = None
 
 # ---------------------------------------------------------------------------
 # GS grade → approximate annual salary range (2024 Step 1 / Step 10)
@@ -74,7 +93,7 @@ def is_target_location(location: str) -> bool:
     if "delaware" in loc or ", de" in loc:
         return True
     if "washington" in loc and ("dc" in loc or "d.c." in loc):
-        return True
+        return INCLUDE_WASHINGTON_DC
     if "chicago" in loc:
         # Reject known suburbs that are distinct cities, not Chicago proper
         for suburb in _CHICAGO_SUBURBS:
@@ -82,6 +101,51 @@ def is_target_location(location: str) -> bool:
                 return False
         return True
     return False
+
+
+def get_last_scan_meta() -> dict[str, Any]:
+    """Return metadata from the most recent run_scan execution."""
+    return dict(_LAST_SCAN_META)
+
+
+def _reset_scan_context() -> None:
+    global _SCAN_CONTEXT
+    _SCAN_CONTEXT = {
+        "indeed_attempts": 0,
+        "indeed_successes": 0,
+        "indeed_errors": {},
+        "excluded_counts": {},
+        "excluded_samples": [],
+    }
+
+
+def _record_exclusion(reason: str, job: dict | None = None) -> None:
+    if _SCAN_CONTEXT is None:
+        return
+    counts = _SCAN_CONTEXT["excluded_counts"]
+    counts[reason] = counts.get(reason, 0) + 1
+    if job and len(_SCAN_CONTEXT["excluded_samples"]) < 12:
+        _SCAN_CONTEXT["excluded_samples"].append(
+            {
+                "reason": reason,
+                "title": job.get("title", ""),
+                "company": job.get("company", ""),
+                "location": job.get("location", ""),
+                "source": job.get("source", ""),
+            }
+        )
+
+
+def _record_indeed_error(code: str) -> None:
+    if _SCAN_CONTEXT is None:
+        return
+    errors = _SCAN_CONTEXT["indeed_errors"]
+    errors[code] = errors.get(code, 0) + 1
+
+
+def _extract_http_status(exc: Exception) -> str:
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return str(status) if status is not None else "request_error"
 
 
 def _parse_salary_token(token: str) -> int:
@@ -297,6 +361,45 @@ def parse_usajobs_saved_snapshot(text: str) -> list[dict]:
     return rows
 
 
+def _maybe_refresh_saved_jobs_snapshot_from_clipboard() -> int:
+    """
+    Refresh the USAJobs saved-jobs snapshot from clipboard text when it looks
+    like a valid saved-jobs page export.
+    """
+    if not AUTO_REFRESH_SAVED_JOBS_FROM_CLIPBOARD:
+        return 0
+    try:
+        proc = subprocess.run(
+            ["pbpaste"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception as exc:
+        log.debug("Clipboard refresh skipped: %s", exc)
+        return 0
+    if proc.returncode != 0:
+        return 0
+    clip = (proc.stdout or "").strip()
+    if not clip:
+        return 0
+    parsed = parse_usajobs_saved_snapshot(clip)
+    if len(parsed) < AUTO_REFRESH_MIN_SAVED_ROWS:
+        return 0
+    try:
+        USAJOBS_SAVED_JOBS_SNAPSHOT.parent.mkdir(parents=True, exist_ok=True)
+        USAJOBS_SAVED_JOBS_SNAPSHOT.write_text(clip, encoding="utf-8")
+        log.info(
+            "Refreshed USAJobs saved snapshot from clipboard (%d parsed rows)",
+            len(parsed),
+        )
+        return len(parsed)
+    except OSError as exc:
+        log.warning("Could not refresh USAJobs snapshot from clipboard: %s", exc)
+        return 0
+
+
 def import_usajobs_saved_jobs(conn: sqlite3.Connection) -> int:
     """
     Import user-saved USAJobs postings from snapshot text file, if present.
@@ -314,6 +417,7 @@ def import_usajobs_saved_jobs(conn: sqlite3.Connection) -> int:
     saved = 0
     for job in parsed:
         if not is_target_location(job["location"]):
+            _record_exclusion("location", job)
             continue
         result = score_job(
             job["title"],
@@ -324,6 +428,7 @@ def import_usajobs_saved_jobs(conn: sqlite3.Connection) -> int:
             job["salary_max"],
         )
         if result["total_score"] <= 0:
+            _record_exclusion("disqualified", job)
             continue
         job["match_score"] = result["total_score"]
         job["score_breakdown"] = result["breakdown"]
@@ -392,6 +497,7 @@ def scan_usajobs(conn: sqlite3.Connection, keyword: str, location: str) -> int:
         try:
             job = parse_usajobs_result(item)
             if not is_target_location(job["location"]):
+                _record_exclusion("location", job)
                 continue
             result = score_job(
                 job["title"],
@@ -401,6 +507,11 @@ def scan_usajobs(conn: sqlite3.Connection, keyword: str, location: str) -> int:
                 job["salary_min"],
                 job["salary_max"],
             )
+            if result["total_score"] <= 0:
+                _record_exclusion("disqualified", job)
+                continue
+            if result["total_score"] < 55:
+                _record_exclusion("low_score", job)
             job["match_score"] = result["total_score"]
             job["score_breakdown"] = result["breakdown"]
             job["job_id"] = generate_job_id(
@@ -426,11 +537,7 @@ def scan_indeed_apify(conn: sqlite3.Connection, keyword: str, location: str) -> 
         log.warning("APIFY_API_TOKEN not set — skipping Indeed/Apify scan")
         return 0
 
-    actor_id = INDEED_ACTOR.replace("/", "~")
-    run_url = (
-        f"https://api.apify.com/v2/acts/{actor_id}/runs"
-        f"?token={APIFY_API_TOKEN}"
-    )
+    actors = [INDEED_ACTOR] + [a for a in INDEED_ACTOR_FALLBACKS if a != INDEED_ACTOR]
     payload = {
         "country": "US",
         "location": location,
@@ -439,70 +546,126 @@ def scan_indeed_apify(conn: sqlite3.Connection, keyword: str, location: str) -> 
         "datePosted": "week",
     }
 
-    try:
-        resp = requests.post(run_url, json=payload, timeout=30)
-        resp.raise_for_status()
-        run_data = resp.json()
-    except requests.RequestException as exc:
-        log.error(
-            "Apify run start failed for '%s' / '%s': %s", keyword, location, exc
+    items: list[dict] = []
+    actor_used = ""
+    for actor in actors:
+        actor_id = actor.replace("/", "~")
+        run_url = f"https://api.apify.com/v2/acts/{actor_id}/runs?token={APIFY_API_TOKEN}"
+        if _SCAN_CONTEXT is not None:
+            _SCAN_CONTEXT["indeed_attempts"] += 1
+        try:
+            resp = requests.post(run_url, json=payload, timeout=30)
+            resp.raise_for_status()
+            run_data = resp.json()
+        except requests.RequestException as exc:
+            code = _extract_http_status(exc)
+            _record_indeed_error(code)
+            log.warning(
+                "Apify run start failed (%s) for '%s' / '%s' with actor '%s': %s",
+                code,
+                keyword,
+                location,
+                actor,
+                exc,
+            )
+            continue
+
+        run_id = run_data.get("data", {}).get("id", "")
+        if not run_id:
+            _record_indeed_error("missing_run_id")
+            log.warning(
+                "Apify returned no run_id for '%s' / '%s' with actor '%s'",
+                keyword,
+                location,
+                actor,
+            )
+            continue
+
+        log.info(
+            "Apify run started: %s (actor=%s, keyword=%s, location=%s)",
+            run_id,
+            actor,
+            keyword,
+            location,
+        )
+
+        status_url = f"https://api.apify.com/v2/actor-runs/{run_id}?token={APIFY_API_TOKEN}"
+        dataset_id: Optional[str] = None
+        deadline = time.time() + 120
+
+        while time.time() < deadline:
+            time.sleep(5)
+            try:
+                status_resp = requests.get(status_url, timeout=15)
+                status_resp.raise_for_status()
+                status_data = status_resp.json().get("data", {})
+            except requests.RequestException as exc:
+                log.warning("Apify status poll failed: %s", exc)
+                continue
+
+            run_status = status_data.get("status", "")
+            if run_status == "SUCCEEDED":
+                dataset_id = status_data.get("defaultDatasetId", "")
+                break
+            if run_status in ("FAILED", "ABORTED", "TIMED-OUT"):
+                _record_indeed_error(run_status.lower())
+                log.warning(
+                    "Apify run %s ended with status: %s (actor=%s)",
+                    run_id,
+                    run_status,
+                    actor,
+                )
+                dataset_id = None
+                break
+
+        if not dataset_id:
+            _record_indeed_error("timeout_or_no_dataset")
+            continue
+
+        items_url = f"https://api.apify.com/v2/datasets/{dataset_id}/items?token={APIFY_API_TOKEN}"
+        try:
+            items_resp = requests.get(items_url, timeout=30)
+            items_resp.raise_for_status()
+            maybe_items = items_resp.json()
+            items = maybe_items if isinstance(maybe_items, list) else []
+            actor_used = actor
+            if _SCAN_CONTEXT is not None:
+                _SCAN_CONTEXT["indeed_successes"] += 1
+            break
+        except requests.RequestException as exc:
+            code = _extract_http_status(exc)
+            _record_indeed_error(code)
+            log.warning(
+                "Apify dataset fetch failed for run %s (actor=%s, code=%s): %s",
+                run_id,
+                actor,
+                code,
+                exc,
+            )
+
+    if not items and actors:
+        log.warning(
+            "Indeed scan exhausted all actors for '%s' / '%s' (%d attempts)",
+            keyword,
+            location,
+            len(actors),
         )
         return 0
 
-    run_id = run_data.get("data", {}).get("id", "")
-    if not run_id:
-        log.error("Apify returned no run_id for '%s' / '%s'", keyword, location)
-        return 0
-
-    log.info("Apify run started: %s (keyword=%s, location=%s)", run_id, keyword, location)
-
-    # Poll for completion (max 120 seconds, every 5 seconds)
-    status_url = f"https://api.apify.com/v2/actor-runs/{run_id}?token={APIFY_API_TOKEN}"
-    dataset_id: Optional[str] = None
-    deadline = time.time() + 120
-
-    while time.time() < deadline:
-        time.sleep(5)
-        try:
-            status_resp = requests.get(status_url, timeout=15)
-            status_resp.raise_for_status()
-            status_data = status_resp.json().get("data", {})
-        except requests.RequestException as exc:
-            log.warning("Apify status poll failed: %s", exc)
-            continue
-
-        run_status = status_data.get("status", "")
-        if run_status == "SUCCEEDED":
-            dataset_id = status_data.get("defaultDatasetId", "")
-            break
-        if run_status in ("FAILED", "ABORTED", "TIMED-OUT"):
-            log.error("Apify run %s ended with status: %s", run_id, run_status)
-            return 0
-
-    if not dataset_id:
-        log.error("Apify run %s did not complete within 120 seconds", run_id)
-        return 0
-
-    # Fetch dataset items
-    items_url = (
-        f"https://api.apify.com/v2/datasets/{dataset_id}/items"
-        f"?token={APIFY_API_TOKEN}"
+    log.info(
+        "Apify '%s' @ '%s' via '%s': %d results",
+        keyword,
+        location,
+        actor_used or INDEED_ACTOR,
+        len(items),
     )
-    try:
-        items_resp = requests.get(items_url, timeout=30)
-        items_resp.raise_for_status()
-        items = items_resp.json()
-    except requests.RequestException as exc:
-        log.error("Apify dataset fetch failed for run %s: %s", run_id, exc)
-        return 0
-
-    log.info("Apify '%s' @ '%s': %d results", keyword, location, len(items))
 
     saved = 0
     for item in items:
         try:
             job = parse_indeed_result(item)
             if not is_target_location(job["location"]):
+                _record_exclusion("location", job)
                 continue
             result = score_job(
                 job["title"],
@@ -513,7 +676,10 @@ def scan_indeed_apify(conn: sqlite3.Connection, keyword: str, location: str) -> 
                 job["salary_max"],
             )
             if result["total_score"] <= 0:
+                _record_exclusion("disqualified", job)
                 continue
+            if result["total_score"] < 55:
+                _record_exclusion("low_score", job)
             job["match_score"] = result["total_score"]
             job["score_breakdown"] = result["breakdown"]
             job["job_id"] = generate_job_id(
@@ -525,6 +691,137 @@ def scan_indeed_apify(conn: sqlite3.Connection, keyword: str, location: str) -> 
             log.warning("Failed to process Indeed item: %s", exc)
 
     return saved
+
+
+# ---------------------------------------------------------------------------
+# python-jobspy (Indeed + LinkedIn)
+# ---------------------------------------------------------------------------
+
+
+def parse_jobspy_row(row: dict) -> dict:
+    """
+    Convert a single python-jobspy DataFrame row (as dict) into the standard
+    job dict used by the pipeline.
+    """
+    title = str(row.get("title") or "")
+    company = str(row.get("company") or "")
+    location = str(row.get("location") or "")
+    url = str(row.get("job_url") or "")
+    description = str(row.get("description") or "")
+
+    # date_posted may be datetime.date, datetime, string, NaT, or None
+    raw_date = row.get("date_posted")
+    if raw_date is None or (hasattr(raw_date, "__class__") and raw_date.__class__.__name__ == "NaTType"):
+        posted_date = ""
+    else:
+        posted_date = str(raw_date)[:10]
+
+    # Salary: jobspy provides numeric columns directly
+    salary_min: Optional[int] = None
+    salary_max: Optional[int] = None
+    try:
+        raw_min = row.get("min_amount")
+        if raw_min is not None and str(raw_min) not in ("", "nan", "None"):
+            salary_min = int(float(raw_min))
+    except (ValueError, TypeError):
+        pass
+    try:
+        raw_max = row.get("max_amount")
+        if raw_max is not None and str(raw_max) not in ("", "nan", "None"):
+            salary_max = int(float(raw_max))
+    except (ValueError, TypeError):
+        pass
+
+    site = str(row.get("site") or "").lower()
+    source = "LinkedIn" if "linkedin" in site else "Indeed"
+
+    return {
+        "title": title,
+        "company": company,
+        "location": location,
+        "url": url,
+        "source": source,
+        "description": description,
+        "posted_date": posted_date,
+        "salary_min": salary_min,
+        "salary_max": salary_max,
+        "sector": "Private",
+    }
+
+
+def scan_jobspy(conn: sqlite3.Connection) -> int:
+    """
+    Scrape Indeed and LinkedIn using python-jobspy for all keywords ×
+    locations.  Falls back gracefully if jobspy is not installed.
+
+    Returns total count of new jobs saved.
+    """
+    try:
+        from jobspy import scrape_jobs
+    except ImportError:
+        log.warning(
+            "python-jobspy not installed — skipping jobspy scan. "
+            "Install with: pip install python-jobspy (requires Python >= 3.10)"
+        )
+        return 0
+
+    locations: list[str] = PROFILE.get("locations", [])
+    total_saved = 0
+
+    for keyword in INDEED_KEYWORDS:
+        for location in locations:
+            log.info("jobspy '%s' @ '%s'", keyword, location)
+            try:
+                df = scrape_jobs(
+                    site_name=JOBSPY_SITES,
+                    search_term=keyword,
+                    location=location,
+                    results_wanted=JOBSPY_RESULTS_WANTED,
+                    hours_old=JOBSPY_HOURS_OLD,
+                    country_indeed=JOBSPY_COUNTRY,
+                    linkedin_fetch_description=True,
+                )
+            except Exception as exc:
+                log.warning("jobspy failed for '%s' @ '%s': %s", keyword, location, exc)
+                continue
+
+            if df is None or df.empty:
+                log.info("  jobspy '%s' @ '%s': 0 results", keyword, location)
+                continue
+
+            rows = df.where(df.notna(), other=None).to_dict(orient="records")
+            log.info("  jobspy '%s' @ '%s': %d results", keyword, location, len(rows))
+
+            for row in rows:
+                try:
+                    job = parse_jobspy_row(row)
+                    if not is_target_location(job["location"]):
+                        _record_exclusion("location", job)
+                        continue
+                    result = score_job(
+                        job["title"],
+                        job["description"],
+                        job["company"],
+                        job["location"],
+                        job["salary_min"],
+                        job["salary_max"],
+                    )
+                    if result["total_score"] <= 0:
+                        _record_exclusion("disqualified", job)
+                        continue
+                    if result["total_score"] < 55:
+                        _record_exclusion("low_score", job)
+                    job["match_score"] = result["total_score"]
+                    job["score_breakdown"] = result["breakdown"]
+                    job["job_id"] = generate_job_id(
+                        job["title"], job["company"], job["location"], job["url"]
+                    )
+                    if save_job(conn, job):
+                        total_saved += 1
+                except Exception as exc:
+                    log.warning("Failed to process jobspy row: %s", exc)
+
+    return total_saved
 
 
 # ---------------------------------------------------------------------------
@@ -563,11 +860,39 @@ def scan_city_smartrecruiters(conn: sqlite3.Connection) -> int:
         posted_date = (p.get("releasedDate") or "")[:10]
 
         if not is_target_location(location):
+            _record_exclusion(
+                "location",
+                {
+                    "title": title,
+                    "company": "City of Philadelphia",
+                    "location": location,
+                    "source": "City Portal",
+                },
+            )
             continue
 
         result = score_job(title, dept, "City of Philadelphia", location, None, None)
         if result["total_score"] <= 0:
+            _record_exclusion(
+                "disqualified",
+                {
+                    "title": title,
+                    "company": "City of Philadelphia",
+                    "location": location,
+                    "source": "City Portal",
+                },
+            )
             continue
+        if result["total_score"] < 55:
+            _record_exclusion(
+                "low_score",
+                {
+                    "title": title,
+                    "company": "City of Philadelphia",
+                    "location": location,
+                    "source": "City Portal",
+                },
+            )
 
         job = {
             "title": title,
@@ -636,7 +961,26 @@ def scan_phdc_careers(conn: sqlite3.Connection) -> int:
             None,
         )
         if result["total_score"] <= 0:
+            _record_exclusion(
+                "disqualified",
+                {
+                    "title": title,
+                    "company": "PHDC",
+                    "location": "Philadelphia, PA",
+                    "source": "PHDC Careers",
+                },
+            )
             continue
+        if result["total_score"] < 55:
+            _record_exclusion(
+                "low_score",
+                {
+                    "title": title,
+                    "company": "PHDC",
+                    "location": "Philadelphia, PA",
+                    "source": "PHDC Careers",
+                },
+            )
         job = {
             "title": title,
             "company": "Philadelphia Housing Development Corporation",
@@ -745,7 +1089,10 @@ def import_pha_jobs(conn: sqlite3.Connection) -> int:
             job["salary_max"],
         )
         if result["total_score"] <= 0:
+            _record_exclusion("disqualified", job)
             continue
+        if result["total_score"] < 55:
+            _record_exclusion("low_score", job)
         job["match_score"] = result["total_score"]
         job["score_breakdown"] = result["breakdown"]
         job["job_id"] = generate_job_id(
@@ -779,12 +1126,15 @@ def run_scan(conn: sqlite3.Connection) -> int:
 
     Returns total count of new jobs saved.
     """
+    global _LAST_SCAN_META
+    _reset_scan_context()
     locations: list[str] = PROFILE.get("locations", [])
-    indeed_keywords = INDEED_KEYWORDS[:5]
 
     total = 0
 
     # --- Snapshot imports (local files) ---
+    _maybe_refresh_saved_jobs_snapshot_from_clipboard()
+
     imported_saved = import_usajobs_saved_jobs(conn)
     if imported_saved:
         log.info("Imported %d jobs from USAJobs saved snapshot", imported_saved)
@@ -813,13 +1163,41 @@ def run_scan(conn: sqlite3.Connection) -> int:
             log.info("  USAJobs '%s' @ '%s' → %d new", keyword, location, count)
             total += count
 
-    # --- Indeed/Apify ---
-    log.info("Starting Indeed/Apify scan (%d keywords × %d locations)", len(indeed_keywords), len(locations))
-    for keyword in indeed_keywords:
-        for location in locations:
-            count = scan_indeed_apify(conn, keyword, location)
-            log.info("  Indeed '%s' @ '%s' → %d new", keyword, location, count)
-            total += count
+    # --- Indeed + LinkedIn via python-jobspy ---
+    log.info("Starting jobspy scan (Indeed + LinkedIn)")
+    count = scan_jobspy(conn)
+    log.info("  jobspy (Indeed + LinkedIn) → %d new", count)
+    total += count
+
+    indeed_attempts = int((_SCAN_CONTEXT or {}).get("indeed_attempts", 0))
+    indeed_successes = int((_SCAN_CONTEXT or {}).get("indeed_successes", 0))
+    indeed_errors = dict((_SCAN_CONTEXT or {}).get("indeed_errors", {}))
+    excluded_counts = dict((_SCAN_CONTEXT or {}).get("excluded_counts", {}))
+    excluded_samples = list((_SCAN_CONTEXT or {}).get("excluded_samples", []))
+
+    if indeed_attempts == 0:
+        source_health = "Indeed not attempted"
+    elif indeed_successes == indeed_attempts:
+        source_health = f"Indeed healthy ({indeed_successes}/{indeed_attempts})"
+    else:
+        top_error = max(indeed_errors.items(), key=lambda it: it[1])[0] if indeed_errors else "unknown"
+        source_health = (
+            f"Indeed degraded ({indeed_successes}/{indeed_attempts} ok, top error: {top_error})"
+        )
+
+    _LAST_SCAN_META = {
+        "source_health": source_health,
+        "indeed_attempts": indeed_attempts,
+        "indeed_successes": indeed_successes,
+        "indeed_errors": indeed_errors,
+        "excluded_counts": excluded_counts,
+        "excluded_samples": excluded_samples,
+    }
+    if excluded_counts:
+        log.info("Excluded jobs by reason: %s", excluded_counts)
+    if excluded_samples:
+        log.info("Excluded samples: %s", excluded_samples[:5])
+    log.info("Source health: %s", source_health)
 
     log.info("Scan complete — %d new jobs saved total", total)
     return total

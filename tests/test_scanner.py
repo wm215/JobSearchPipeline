@@ -86,10 +86,15 @@ def test_is_target_location_accepts_core_regions():
 
 
 def test_is_target_location_accepts_washington_dc():
-    from scanner import is_target_location
+    import scanner as scanner_mod
 
-    assert is_target_location("Washington, DC")
-    assert is_target_location("Washington, D.C.")
+    original = scanner_mod.INCLUDE_WASHINGTON_DC
+    try:
+        scanner_mod.INCLUDE_WASHINGTON_DC = True
+        assert scanner_mod.is_target_location("Washington, DC")
+        assert scanner_mod.is_target_location("Washington, D.C.")
+    finally:
+        scanner_mod.INCLUDE_WASHINGTON_DC = original
 
 
 def test_is_target_location_rejects_non_targets():
@@ -519,3 +524,107 @@ def test_import_usajobs_saved_jobs(tmp_path, monkeypatch):
         assert row["company"] == "Public Buildings Service"
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# python-jobspy
+# ---------------------------------------------------------------------------
+
+
+def test_parse_jobspy_row_linkedin():
+    from scanner import parse_jobspy_row
+
+    row = {
+        "title": "Program Analyst",
+        "company": "HUD",
+        "location": "Philadelphia, PA",
+        "job_url": "https://www.linkedin.com/jobs/view/12345",
+        "description": "Federal housing policy work",
+        "date_posted": "2026-04-10",
+        "min_amount": 95000.0,
+        "max_amount": 130000.0,
+        "site": "linkedin",
+    }
+    job = parse_jobspy_row(row)
+    assert job["title"] == "Program Analyst"
+    assert job["source"] == "LinkedIn"
+    assert job["salary_min"] == 95000
+    assert job["salary_max"] == 130000
+    assert job["posted_date"] == "2026-04-10"
+    assert job["sector"] == "Private"
+
+
+def test_parse_jobspy_row_indeed():
+    from scanner import parse_jobspy_row
+
+    row = {
+        "title": "Contract Specialist",
+        "company": "Acme",
+        "location": "Chicago, IL",
+        "job_url": "https://www.indeed.com/viewjob?jk=abc",
+        "description": "Contracting role",
+        "date_posted": None,
+        "min_amount": None,
+        "max_amount": None,
+        "site": "indeed",
+    }
+    job = parse_jobspy_row(row)
+    assert job["source"] == "Indeed"
+    assert job["salary_min"] is None
+    assert job["posted_date"] == ""
+
+
+def test_scan_jobspy_saves_jobs(tmp_path):
+    """Mock jobspy scrape_jobs, verify jobs scored and saved."""
+    from unittest.mock import MagicMock, patch
+
+    import pandas as pd
+
+    import scanner as scanner_mod
+    from db import init_db
+
+    db_path = str(tmp_path / "jobspy_test.db")
+    conn = init_db(db_path)
+
+    fake_df = pd.DataFrame([{
+        "title": "Housing Program Manager",
+        "company": "City of Philadelphia",
+        "location": "Philadelphia, PA",
+        "job_url": "https://www.linkedin.com/jobs/view/99999",
+        "description": "Manage federal housing programs, HUD grants, community development.",
+        "date_posted": "2026-04-15",
+        "min_amount": 100000.0,
+        "max_amount": 140000.0,
+        "site": "linkedin",
+    }])
+
+    mock_module = MagicMock()
+    mock_module.scrape_jobs = MagicMock(return_value=fake_df)
+
+    with patch.dict("sys.modules", {"jobspy": mock_module}):
+        count = scanner_mod.scan_jobspy(conn)
+
+    assert count >= 1
+    row = conn.execute(
+        "SELECT source, match_score FROM jobs WHERE source IN ('LinkedIn', 'Indeed')"
+    ).fetchone()
+    assert row is not None
+    assert dict(row)["match_score"] > 0
+    conn.close()
+
+
+def test_scan_jobspy_not_installed(tmp_path):
+    """Returns 0 gracefully when jobspy is not installed."""
+    from unittest.mock import patch
+
+    import scanner as scanner_mod
+    from db import init_db
+
+    db_path = str(tmp_path / "jobspy_missing_test.db")
+    conn = init_db(db_path)
+
+    with patch.dict("sys.modules", {"jobspy": None}):
+        count = scanner_mod.scan_jobspy(conn)
+
+    assert count == 0
+    conn.close()

@@ -86,10 +86,12 @@ def test_pipeline_scan_returns_zero_without_keys(tmp_path):
     try:
         with mock.patch("scanner.USAJOBS_API_KEY", ""), \
              mock.patch("scanner.APIFY_API_TOKEN", ""), \
+             mock.patch("scanner.AUTO_REFRESH_SAVED_JOBS_FROM_CLIPBOARD", False), \
              mock.patch("scanner.USAJOBS_SAVED_JOBS_SNAPSHOT", pathlib.Path(tmp_path / "missing_saved_jobs.txt")), \
              mock.patch("scanner.PHA_CAREERS_SNAPSHOT", pathlib.Path(tmp_path / "missing_pha.txt")), \
              mock.patch("scanner.scan_city_smartrecruiters", return_value=0), \
-             mock.patch("scanner.scan_phdc_careers", return_value=0):
+             mock.patch("scanner.scan_phdc_careers", return_value=0), \
+             mock.patch("scanner.scan_jobspy", return_value=0):
             count = run_scan(conn)
         assert count == 0
     finally:
@@ -261,7 +263,36 @@ def test_query_new_jobs_includes_washington_dc(tmp_path):
     )
     conn.commit()
 
-    result = run_module._query_new_jobs(conn)
+    with mock.patch.object(run_module, "INCLUDE_WASHINGTON_DC", True):
+        result = run_module._query_new_jobs(conn)
     conn.close()
 
     assert any(r["location"] == "Washington, DC" for r in result)
+
+
+def test_query_apply_now_returns_high_score_unapplied(tmp_path):
+    from db import init_db
+
+    db_path = str(tmp_path / "apply_now_test.db")
+    conn = init_db(db_path)
+    conn.execute(
+        """
+        INSERT INTO jobs (job_id, title, company, location, url, source, match_score, found_date, applied)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '-1 hour', 'utc'), 0)
+        """,
+        ("job-apply-1", "Contract Specialist", "EPA", "Philadelphia, PA", "https://example.com/1", "USAJobs", 88),
+    )
+    conn.execute(
+        """
+        INSERT INTO jobs (job_id, title, company, location, url, source, match_score, found_date, applied)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '-1 hour', 'utc'), 1)
+        """,
+        ("job-apply-2", "Program Analyst", "EPA", "Philadelphia, PA", "https://example.com/2", "USAJobs", 99),
+    )
+    conn.commit()
+
+    rows = run_module._query_apply_now(conn, limit=10)
+    conn.close()
+    assert len(rows) == 1
+    assert rows[0]["title"] == "Contract Specialist"
+    assert rows[0]["match_score"] >= 75
