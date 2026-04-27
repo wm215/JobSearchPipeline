@@ -4,25 +4,32 @@ scoring.py — Qualification-gated job scoring engine for the JobSearchPipeline.
 Pipeline:
   1. DISQUALIFY  — role requires a credential Will doesn't have → score 0
   2. SALARY GATE — both min and max must be >= $90k (or missing) → score 0
-  3. DOMAIN      — 35 pts, tier-based keyword matching
-  4. ROLE        — 25 pts, title keyword matching
+  3. DOMAIN      — 35 pts, tier-based keyword matching (word-boundary)
+  4. ROLE        — 25 pts, title keyword matching (word-boundary)
   5. SKILLS      — 20 pts, core-skills count from description
   6. SALARY      — 10 pts, based on advertised range
   7. LOCATION    — 10 pts, target-city matching
   8. DOMAIN GATE — if domain < DOMAIN_GATE_MIN, cap total at 50
 
-Decision: AUTO_APPLY >= 75 | REVIEW 55-74 | SKIP < 55
+Decision: TOP_MATCH >= 75 | REVIEW 55-74 | SKIP < 55
 """
 
 from __future__ import annotations
 
+import re
+
 from config import (
-    AUTO_APPLY_THRESHOLD,
     DISQUALIFY_PHRASES,
     DOMAIN_GATE_MIN,
     PRIVATE_SECTOR_CAP,
     REVIEW_THRESHOLD,
+    TOP_MATCH_THRESHOLD,
 )
+
+
+def _kw_match(text: str, keyword: str) -> bool:
+    """Word-boundary keyword match — prevents false substring hits like 'reo' in 'reorganize'."""
+    return re.search(rf"\b{re.escape(keyword)}\b", text) is not None
 
 # ---------------------------------------------------------------------------
 # Core skills used for the skills dimension
@@ -83,6 +90,17 @@ _DOMAIN_TIER1_KEYWORDS: list[str] = [
     "lihtc",
     "fair housing",
     "housing and urban development",
+    # Housing / policy nonprofits (added 2026-04-20)
+    "local initiatives support corporation",
+    "lisc",
+    "enterprise community partners",
+    "corporation for supportive housing",
+    "nahro",
+    "national association of housing and redevelopment officials",
+    "habitat for humanity",
+    "project home",
+    "heartland alliance",
+    "urban institute",
 ]
 
 _DOMAIN_TIER2_KEYWORDS: list[str] = [
@@ -103,6 +121,21 @@ _DOMAIN_TIER2_KEYWORDS: list[str] = [
     "housing department",
     "neighborhood development",
     "urban planning",
+    # State of Pennsylvania (added 2026-04-20)
+    "commonwealth of pennsylvania",
+    "pennsylvania department of",
+    "penndot",
+    "pa department of",
+    "philadelphia county",
+    # State of New Jersey (added 2026-04-20)
+    "state of new jersey",
+    "new jersey department of",
+    "njdot",
+    "nj department of",
+    "camden county",
+    "burlington county",
+    "gloucester county",
+    "mercer county",
 ]
 
 _DOMAIN_TIER3_KEYWORDS: list[str] = [
@@ -257,15 +290,11 @@ _ROLE_PARTIAL_KEYWORDS: list[str] = [
 ]
 
 _ROLE_WEAK_KEYWORDS: list[str] = [
-    "manager",
-    "analyst",
     "coordinator",
     "specialist",
     "advisor",
     "consultant",
     "administrator",
-    "director",
-    "officer",
 ]
 
 # Salary threshold constants
@@ -310,7 +339,7 @@ def score_job(
 
     Returns a dict with keys:
         total_score  : int          (0-100)
-        status       : str          (DISQUALIFIED | SKIP | REVIEW | AUTO_APPLY)
+        status       : str          (DISQUALIFIED | SKIP | REVIEW | TOP_MATCH)
         reason       : str | None   (set when DISQUALIFIED)
         breakdown    : dict         (per-dimension scores)
     """
@@ -352,7 +381,7 @@ def score_job(
     role = _score_role(title_lower)
     skills = _score_skills(description)
     salary = _score_salary(salary_min, salary_max)
-    loc = _score_location(location_lower)
+    loc = _score_location(location_lower, salary_min)
 
     raw_total = domain + role + skills + salary + loc
 
@@ -397,47 +426,49 @@ def score_job(
 
 
 def _score_domain(combined_lower: str, company_lower: str) -> int:
-    """Score the domain dimension (0-35 pts)."""
-    # Private-sector employer cap: max 8 pts regardless of keyword matches
-    for cap_company in PRIVATE_SECTOR_CAP:
-        if cap_company.lower() in company_lower:
-            return 8
-
-    # Tier 1: HUD / housing authority specific (35 pts)
+    """Score the domain dimension (0-35 pts). Word-boundary matching throughout."""
+    # Tier 1 first: HUD / housing authority / housing nonprofit (35 pts) —
+    # explicit gov/nonprofit names beat any private-sector cap.
     for kw in _DOMAIN_TIER1_KEYWORDS:
-        if kw in combined_lower:
+        if _kw_match(combined_lower, kw):
             return 35
 
     # Tier 2: City / county / state government (25 pts)
     for kw in _DOMAIN_TIER2_KEYWORDS:
-        if kw in combined_lower:
+        if _kw_match(combined_lower, kw):
             return 25
+
+    # Private-sector employer cap (applied AFTER gov/nonprofit tiers) —
+    # prevents BMO/PNC/etc. from claiming Tier 3 "federal contract" hits.
+    for cap_company in PRIVATE_SECTOR_CAP:
+        if cap_company.lower() in company_lower:
+            return 8
 
     # Tier 3: Federal / govcon (17 pts)
     for kw in _DOMAIN_TIER3_KEYWORDS:
-        if kw in combined_lower:
+        if _kw_match(combined_lower, kw):
             return 17
 
     # Tier 4: Adjacent (8 pts)
     for kw in _DOMAIN_TIER4_KEYWORDS:
-        if kw in combined_lower:
+        if _kw_match(combined_lower, kw):
             return 8
 
     return 0
 
 
 def _score_role(title_lower: str) -> int:
-    """Score the role dimension (0-25 pts)."""
+    """Score the role dimension (0-25 pts). Word-boundary matching."""
     for kw in _ROLE_STRONG_KEYWORDS:
-        if kw in title_lower:
+        if _kw_match(title_lower, kw):
             return 25
 
     for kw in _ROLE_PARTIAL_KEYWORDS:
-        if kw in title_lower:
+        if _kw_match(title_lower, kw):
             return 17
 
     for kw in _ROLE_WEAK_KEYWORDS:
-        if kw in title_lower:
+        if _kw_match(title_lower, kw):
             return 9
 
     return 0
@@ -494,22 +525,46 @@ def _score_linkedin(company_lower: str, combined_lower: str) -> tuple[int, int, 
     return conn_bonus, endorse_bonus, app_bonus
 
 
-def _score_location(location_lower: str) -> int:
+_PHILLY_ADJACENT_NJ = (
+    "camden", "burlington", "gloucester", "mercer", "cherry hill",
+    "trenton", "atco", "vineland", "mount laurel", "moorestown",
+)
+_DISTANT_NJ_SUBURBS = (
+    "dover, nj", "springfield, nj", "newark", "jersey city", "paterson",
+    "elizabeth", "edison", "hoboken", "atlantic city", "lakewood",
+    "toms river", "perth amboy", "new brunswick",
+)
+
+
+_DC_SLAM_DUNK_SALARY_MIN = 130_000
+
+
+def _score_location(location_lower: str, salary_min: int | None = None) -> int:
     """Score the location dimension (0-10 pts)."""
     if "philadelphia" in location_lower or "philly" in location_lower:
         return 10
-    if "new jersey" in location_lower or ", nj" in location_lower:
-        return 10
     if "delaware" in location_lower or ", de" in location_lower:
         return 10
+    # DC is "slam-dunk only" — low default; full points only for GS-14+ salaries.
     if "washington" in location_lower and ("dc" in location_lower or "d.c." in location_lower):
-        return 8
+        if salary_min is not None and salary_min >= _DC_SLAM_DUNK_SALARY_MIN:
+            return 10
+        return 3
+    # NJ: distinguish Philly-adjacent from distant commuter towns
+    if "new jersey" in location_lower or ", nj" in location_lower:
+        if any(city in location_lower for city in _PHILLY_ADJACENT_NJ):
+            return 10
+        if any(city in location_lower for city in _DISTANT_NJ_SUBURBS):
+            return 3
+        return 5  # Other NJ — modest credit
     if "chicago" in location_lower:
-        return 7
+        return 9
+    # Remote counts as second-tier with Chicago — hybrid-Philly, hybrid-Chicago,
+    # or fully-remote are all acceptable to William.
     if "remote" in location_lower:
-        return 6
+        return 9
     if "telework" in location_lower:
-        return 6
+        return 9
     if "multiple locations" in location_lower:
         return 5
     if "location negotiable" in location_lower:
@@ -523,8 +578,8 @@ def _score_location(location_lower: str) -> int:
 
 
 def _decide(score: int) -> str:
-    if score >= AUTO_APPLY_THRESHOLD:
-        return "AUTO_APPLY"
+    if score >= TOP_MATCH_THRESHOLD:
+        return "TOP_MATCH"
     if score >= REVIEW_THRESHOLD:
         return "REVIEW"
     return "SKIP"

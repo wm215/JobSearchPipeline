@@ -208,6 +208,31 @@ def test_build_digest_html_footer_contains_timestamp():
     assert "JobSearchPipeline" in html
 
 
+def test_build_digest_html_includes_apply_now_section():
+    html = build_digest_html(
+        new_jobs=[],
+        researched=[],
+        cover_letters=[],
+        warm_leads=[],
+        stats=SAMPLE_STATS,
+        apply_now=[SAMPLE_JOB],
+    )
+    assert "Apply Now Queue" in html
+    assert "Contract Specialist" in html
+
+
+def test_build_digest_html_includes_health_note():
+    html = build_digest_html(
+        new_jobs=[],
+        researched=[],
+        cover_letters=[],
+        warm_leads=[],
+        stats=SAMPLE_STATS,
+        health_note="Health: Indeed degraded",
+    )
+    assert "Health: Indeed degraded" in html
+
+
 # ---------------------------------------------------------------------------
 # send_digest tests (mocked SMTP)
 # ---------------------------------------------------------------------------

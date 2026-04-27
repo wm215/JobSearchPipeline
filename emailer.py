@@ -46,6 +46,8 @@ def build_digest_html(
     cover_letters: list[dict],
     warm_leads: list[dict],
     stats: dict[str, Any],
+    apply_now: list[dict] | None = None,
+    health_note: str = "",
 ) -> str:
     """
     Build an HTML email digest.
@@ -82,6 +84,8 @@ def build_digest_html(
         f"</td>"
         for label, val, color in stats_cells
     )
+
+    apply_now = apply_now or []
 
     # ---------- Top Matches table ----------
     if new_jobs:
@@ -141,6 +145,40 @@ def build_digest_html(
             "Top Matches</h2>"
             '<p style="color:#888;">No new matches today.</p>'
         )
+
+    # ---------- Apply-now queue ----------
+    if apply_now:
+        queue_rows = ""
+        for job in apply_now:
+            score = int(job.get("match_score", 0))
+            queue_rows += (
+                "<tr>"
+                f'<td style="padding:8px 12px;text-align:center;font-weight:bold;color:{_score_color(score)};">{score}</td>'
+                f'<td style="padding:8px 12px;"><a href="{job.get("url", "#")}" style="color:#1565c0;text-decoration:none;font-weight:bold;">{job.get("title", "")}</a></td>'
+                f'<td style="padding:8px 12px;color:#444;">{job.get("company", "")}</td>'
+                f'<td style="padding:8px 12px;color:#666;">{job.get("location", "")}</td>'
+                "</tr>"
+            )
+        apply_section = f"""
+        <h2 style="color:#2e7d32;border-bottom:2px solid #2e7d32;padding-bottom:6px;">
+            Apply Now Queue ({len(apply_now)})
+        </h2>
+        <table style="width:100%;border-collapse:collapse;">
+            <thead>
+                <tr style="background:#f5f5f5;">
+                    <th style="padding:8px 12px;text-align:center;color:#666;font-size:12px;">SCORE</th>
+                    <th style="padding:8px 12px;text-align:left;color:#666;font-size:12px;">TITLE</th>
+                    <th style="padding:8px 12px;text-align:left;color:#666;font-size:12px;">COMPANY</th>
+                    <th style="padding:8px 12px;text-align:left;color:#666;font-size:12px;">LOCATION</th>
+                </tr>
+            </thead>
+            <tbody>
+                {queue_rows}
+            </tbody>
+        </table>
+        """
+    else:
+        apply_section = ""
 
     # ---------- Warm Leads section ----------
     if warm_leads:
@@ -232,6 +270,7 @@ def build_digest_html(
 <div class="container">
   <div class="header">
     <h1>Job Search Daily Digest &mdash; {now_str}</h1>
+    {f'<div style="margin-top:8px;font-size:12px;opacity:0.95;">{health_note}</div>' if health_note else ''}
   </div>
   <div class="stats-bar">
     <table style="width:100%;border-collapse:collapse;">
@@ -240,6 +279,7 @@ def build_digest_html(
   </div>
   <div class="content">
     {matches_section}
+    {apply_section}
     {warm_section}
     {cl_section}
     {research_section}
@@ -265,6 +305,8 @@ def send_digest(
     cover_letters: list[dict],
     warm_leads: list[dict],
     stats: dict[str, Any],
+    apply_now: list[dict] | None = None,
+    health_note: str = "",
 ) -> bool:
     """
     Build and send the HTML digest via Gmail SMTP.
@@ -281,7 +323,15 @@ def send_digest(
     subject = f"Job Search Daily Digest \u2014 {date_str} \u2014 {n_new} New Matches"
 
     try:
-        html_body = build_digest_html(new_jobs, researched, cover_letters, warm_leads, stats)
+        html_body = build_digest_html(
+            new_jobs,
+            researched,
+            cover_letters,
+            warm_leads,
+            stats,
+            apply_now=apply_now,
+            health_note=health_note,
+        )
     except Exception as exc:
         log.error("Failed to build digest HTML: %s", exc)
         return False
@@ -299,10 +349,13 @@ def send_digest(
             server.login(_SENDER, EMAIL_PASS)
             server.sendmail(_SENDER, EMAIL_TO, msg.as_string())
         log.info("Digest email sent to %s", EMAIL_TO)
-        return True
     except Exception as exc:
         log.error("Failed to send digest email: %s", exc)
         return False
+
+    from inbox_rescue import rescue_to_inbox
+    rescue_to_inbox(msg['Subject'])
+    return True
 
 
 def send_error_email(stage: str, error: str, completed_stages: list[str]) -> bool:

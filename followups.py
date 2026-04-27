@@ -134,10 +134,13 @@ def send_followup_email(applications_needing_followup):
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(email_from, email_pass)
             server.sendmail(email_from, email_to, msg.as_string())
-        return True
     except Exception as e:
         print(f"❌ Error sending email: {e}")
         return False
+
+    from inbox_rescue import rescue_to_inbox
+    rescue_to_inbox(msg['Subject'])
+    return True
 
 def main():
     print("="*80)

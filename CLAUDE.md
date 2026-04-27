@@ -24,7 +24,7 @@ All modes accept `--dry-run`.
 | File | Purpose |
 |------|---------|
 | `config.py` | All settings: locations, salary range, keywords, paths, thresholds |
-| `scanner.py` | Stage 1: USAJobs API + Indeed/Apify scraping + saved-jobs snapshot import |
+| `scanner.py` | Stage 1: USAJobs API + Indeed/LinkedIn (python-jobspy) + Philadelphia portals + saved-jobs snapshot import |
 | `scoring.py` | Qualification-gated scoring engine (0-100) with LinkedIn bonuses |
 | `researcher.py` | Stage 2: generate talking points for top matches |
 | `preparer.py` | Stage 3: generate cover letters |
@@ -65,7 +65,7 @@ Tables: `jobs`, `job_research`, `job_applications`, `warm_leads`, `pipeline_runs
 - Endorsements (+10 max): REO=8, HUD=8, Foreclosure=7, Property Mgmt=7, etc.
 - Application history (+10 max): CHA=10, HUD=10, PHA=9, Fannie=9, etc.
 
-Decision: AUTO_APPLY >= 75 | REVIEW 55-74 | SKIP < 55
+Decision: TOP_MATCH >= 75 | REVIEW 55-74 | SKIP < 55
 
 ## USAJOBS Saved-Jobs Snapshot
 

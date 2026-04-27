@@ -161,7 +161,7 @@ def test_scores_perfect_hud_job():
         salary_max=129000,
     )
     assert result["total_score"] >= 85
-    assert result["status"] == "AUTO_APPLY"
+    assert result["status"] == "TOP_MATCH"
 
 
 def test_contract_specialist_scores_well():
@@ -177,7 +177,7 @@ def test_contract_specialist_scores_well():
         salary_max=140000,
     )
     assert result["total_score"] >= 70
-    assert result["status"] in ("AUTO_APPLY", "REVIEW")
+    assert result["status"] in ("TOP_MATCH", "REVIEW")
 
 
 def test_city_of_chicago_housing_scores_high():
@@ -193,7 +193,7 @@ def test_city_of_chicago_housing_scores_high():
         salary_max=125000,
     )
     assert result["total_score"] >= 75
-    assert result["status"] == "AUTO_APPLY"
+    assert result["status"] == "TOP_MATCH"
 
 
 def test_no_salary_listed_gets_neutral_score():
@@ -210,7 +210,9 @@ def test_no_salary_listed_gets_neutral_score():
     assert result["breakdown"]["salary"] == 5
 
 
-def test_remote_job_gets_reduced_location_score():
+def test_remote_job_gets_second_tier_location_score():
+    """Remote/telework counts as second-tier (9 pts), same as Chicago —
+    hybrid-Philly / hybrid-Chicago / fully-remote are all acceptable."""
     result = score_job(
         title="Policy Analyst",
         description="Federal policy analysis, stakeholder engagement, compliance",
@@ -219,10 +221,24 @@ def test_remote_job_gets_reduced_location_score():
         salary_min=100000,
         salary_max=130000,
     )
-    assert result["breakdown"]["location"] == 6
+    assert result["breakdown"]["location"] == 9
 
 
-def test_washington_dc_gets_location_score():
+def test_washington_dc_slam_dunk_gets_full_location_score():
+    """DC jobs at GS-14+ salary ($130k+) get full 10 pts location."""
+    result = score_job(
+        title="Program Analyst",
+        description="Federal housing program management",
+        company="HUD",
+        location="Washington, DC",
+        salary_min=135000,
+        salary_max=175000,
+    )
+    assert result["breakdown"]["location"] == 10
+
+
+def test_washington_dc_below_slam_dunk_gets_low_location_score():
+    """DC jobs under $130k salary get only 3 pts — slam-dunk-only policy."""
     result = score_job(
         title="Program Analyst",
         description="Federal housing program management",
@@ -231,7 +247,7 @@ def test_washington_dc_gets_location_score():
         salary_min=100000,
         salary_max=130000,
     )
-    assert result["breakdown"]["location"] == 8
+    assert result["breakdown"]["location"] == 3
 
 
 def test_non_target_location_gets_default_score():

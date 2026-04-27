@@ -37,10 +37,11 @@ CREATE TABLE IF NOT EXISTS jobs (
     match_score     REAL DEFAULT 0,
     score_breakdown TEXT,          -- JSON blob
     sector          TEXT,
-    notified        INTEGER DEFAULT 0,
-    applied         INTEGER DEFAULT 0,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now','utc')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now','utc'))
+    notified           INTEGER DEFAULT 0,
+    applied            INTEGER DEFAULT 0,
+    automation_blocked INTEGER DEFAULT 0,  -- set by /apply when site has login wall / CAPTCHA / human-only
+    created_at         TEXT NOT NULL DEFAULT (datetime('now','utc')),
+    updated_at         TEXT NOT NULL DEFAULT (datetime('now','utc'))
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_score   ON jobs(match_score DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_found   ON jobs(found_date);

@@ -21,7 +21,6 @@ EMAIL_TO: str = os.getenv("EMAIL_TO", "")
 
 USAJOBS_API_KEY: str = os.getenv("USAJOBS_API_KEY", "")
 USAJOBS_EMAIL: str = EMAIL_USER  # USAJobs uses the same email as the account identifier
-APIFY_API_TOKEN: str = os.getenv("APIFY_API_TOKEN", os.getenv("APIFY_TOKEN", ""))
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -60,11 +59,18 @@ TARGET_REGIONS: list[str] = [
     "Chicago IL",
 ]
 
-# Keep DC optional so targeting can be changed with one flag.
-INCLUDE_WASHINGTON_DC: bool = os.getenv("INCLUDE_WASHINGTON_DC", "0") == "1"
+# DC is enabled by default but gated by salary/score at the scoring layer —
+# only "slam-dunk" DC jobs ($130k+ salary + strong role/domain fit) make TOP_MATCH.
+INCLUDE_WASHINGTON_DC: bool = os.getenv("INCLUDE_WASHINGTON_DC", "1") == "1"
 
 # Candidate scoring + apply queue thresholds.
 APPLY_NOW_THRESHOLD: int = int(os.getenv("APPLY_NOW_THRESHOLD", "75"))
+
+# OpenAI extraction throttling for tracker.py to avoid quota/rate-limit failures.
+OPENAI_MAX_CALLS_PER_RUN: int = int(os.getenv("OPENAI_MAX_CALLS_PER_RUN", "25"))
+OPENAI_MIN_SECONDS_BETWEEN_CALLS: float = float(os.getenv("OPENAI_MIN_SECONDS_BETWEEN_CALLS", "1.5"))
+OPENAI_MAX_RETRIES: int = int(os.getenv("OPENAI_MAX_RETRIES", "2"))
+OPENAI_BASE_BACKOFF_SECONDS: float = float(os.getenv("OPENAI_BASE_BACKOFF_SECONDS", "2.0"))
 
 # Attempt to refresh the USAJobs saved-jobs snapshot from clipboard text.
 AUTO_REFRESH_SAVED_JOBS_FROM_CLIPBOARD: bool = os.getenv(
@@ -101,9 +107,9 @@ PROFILE: dict = {
 # Scoring thresholds
 # ---------------------------------------------------------------------------
 
-AUTO_APPLY_THRESHOLD: int = 75   # score >= this → auto-apply
+TOP_MATCH_THRESHOLD: int = 75    # score >= this → surface as TOP_MATCH (manual apply)
 REVIEW_THRESHOLD: int = 55       # score >= this → human review
-DOMAIN_GATE_MIN: int = 10        # minimum domain score to pass gate
+DOMAIN_GATE_MIN: int = 15        # minimum domain score to pass gate (Tier 3 federal=17 passes; Tier 4 alone=8 fails)
 
 # ---------------------------------------------------------------------------
 # USAJobs occupational series
@@ -126,17 +132,11 @@ USAJOBS_SERIES: list[str] = [
 ]
 
 # ---------------------------------------------------------------------------
-# Indeed / Apify
+# Indeed / LinkedIn (via python-jobspy)
 # ---------------------------------------------------------------------------
 
-INDEED_ACTOR: str = os.getenv("INDEED_ACTOR", "valig/indeed-jobs-scraper")
-INDEED_ACTOR_FALLBACKS: list[str] = [
-    a.strip()
-    for a in os.getenv("INDEED_ACTOR_FALLBACKS", "").split(",")
-    if a.strip()
-]
-
 INDEED_KEYWORDS: list[str] = [
+    # Original 8 — government / housing / policy core
     "Program Analyst",
     "Program Manager",
     "Contract Specialist",
@@ -145,6 +145,25 @@ INDEED_KEYWORDS: list[str] = [
     "Housing Director",
     "Compliance Manager",
     "Government Relations",
+    # Expansion 2026-04-27 — surface state/county/contractor/nonprofit jobs
+    # State / county / municipal
+    "State Program Manager",
+    "Director of Housing",
+    "Housing Authority",
+    "Public Housing",
+    # Federal contractor
+    "Government Contractor",
+    "Federal Compliance",
+    "Federal Program Manager",
+    "GRC Program Manager",
+    # GSE / mortgage
+    "Mortgage Compliance",
+    "Loss Mitigation Manager",
+    # Nonprofit / foundation / think tank
+    "Foundation Program Officer",
+    "Senior Program Officer",
+    "Director of Programs",
+    "Policy Manager",
 ]
 
 # ---------------------------------------------------------------------------
@@ -152,7 +171,7 @@ INDEED_KEYWORDS: list[str] = [
 # ---------------------------------------------------------------------------
 
 JOBSPY_SITES: list[str] = ["indeed", "linkedin"]
-JOBSPY_RESULTS_WANTED: int = 50      # per keyword/location search
+JOBSPY_RESULTS_WANTED: int = 30      # per keyword/location search (lowered 04-27 after keyword expansion)
 JOBSPY_HOURS_OLD: int = 168          # 7 days
 JOBSPY_COUNTRY: str = "USA"
 
@@ -247,6 +266,63 @@ DISQUALIFY_PHRASES: list[str] = [
     "truck driver",
     "cdl",
     "equipment operator",
+    # Construction / Skilled Trades — William has no construction experience
+    "construction project manager",
+    "construction superintendent",
+    "construction manager",
+    "construction supervisor",
+    "construction foreman",
+    "general contractor",
+    "site superintendent",
+    "field engineer",
+    "estimator",
+    "carpenter",
+    "electrician",
+    "plumber",
+    "hvac technician",
+    "welder",
+    "ironworker",
+    # Architecture (building) — William is a Program Analyst, not a designer
+    "architect",
+    "architectural designer",
+    "draftsman",
+    "drafter",
+    "interior designer",
+    "landscape architect",
+    "urban designer",
+    # Clinical / Caregiver
+    "social worker",
+    "case manager",  # often a clinical/social-services role
+    "child welfare",
+    "behavioral health",
+    "substance abuse counselor",
+    "therapist",
+    # Manufacturing / Production
+    "production supervisor",
+    "production manager",
+    "manufacturing manager",
+    "plant manager",
+    "machine operator",
+    "assembly",
+    "quality assurance technician",
+    # Retail / Service
+    "store manager",
+    "retail manager",
+    "customer service representative",
+    "cashier",
+    "barista",
+    "server",
+    # Misc roles unrelated to William's profile
+    "marketing manager",
+    "creative director",
+    "brand manager",
+    "event coordinator",
+    "graphic designer",
+    "video editor",
+    "photographer",
+    "executive assistant",  # admin support, not the analyst he is
+    "personal assistant",
+    "receptionist",
 ]
 
 # ---------------------------------------------------------------------------
@@ -284,8 +360,45 @@ PRIVATE_SECTOR_CAP: list[str] = [
     "bank of america",
     "wells fargo",
     "citibank",
+    "citigroup",
     "blackrock",
     "vanguard",
+    "bmo",
+    "pnc financial",
+    "pnc bank",
+    "capital one",
+    "td bank",
+    "td ameritrade",
+    "hsbc",
+    "american express",
+    "amex",
+    "discover financial",
+    "ally financial",
+    "u.s. bank",
+    "us bank",
+    "fifth third",
+    "truist",
+    "keybank",
+    "charles schwab",
+    "state street",
+    "bny mellon",
+    "northern trust",
+    "raymond james",
+    "edward jones",
+    "fidelity investments",
+    "deutsche bank",
+    "barclays",
+    "ubs",
+    "credit suisse",
+    "prudential",
+    "metlife",
+    "aig",
+    "allstate",
+    "geico",
+    "progressive insurance",
+    "state farm",
+    "nationwide insurance",
+    "liberty mutual",
     # Fitness
     "edge fitness",
     "planet fitness",

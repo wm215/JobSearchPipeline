@@ -1,0 +1,119 @@
+name: Job Search Pipeline
+
+on:
+  schedule:
+    # Times are UTC. EDT = UTC-4.
+    # Pipeline (job scan) — every 2h, 12:00–24:00 UTC = 8 AM – 8 PM EDT
+    - cron: "0 12,14,16,18,20,22,0 * * *"
+    # Morning digest — 11:30 UTC = 7:30 AM EDT
+    - cron: "30 11 * * *"
+    # Follow-ups — 12:00 UTC = 8:00 AM EDT
+    - cron: "0 12 * * *"
+    # Nightly tracker — 1:00 UTC = 9:00 PM EDT (previous day)
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Pipeline mode to run"
+        required: true
+        default: "pipeline"
+        type: choice
+        options: [pipeline, digest, followups, nightly, all]
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Restore SQLite DB from cache
+        id: cache-db
+        uses: actions/cache@v4
+        with:
+          path: data/job_pipeline.db
+          # Cache key includes month so we get a fresh DB each month if needed
+          key: job-db-${{ github.run_id }}
+          restore-keys: |
+            job-db-
+
+      - name: Restore Gmail OAuth token from secret
+        run: |
+          mkdir -p ~
+          echo "$GMAIL_TOKEN_B64" | base64 -d > ~/gmail_token.pickle
+        env:
+          GMAIL_TOKEN_B64: ${{ secrets.GMAIL_TOKEN_B64 }}
+
+      - name: Determine mode (cron vs manual)
+        id: mode
+        run: |
+          # workflow_dispatch passes a chosen mode; cron decides by hour
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
+          else
+            HOUR=$(date -u +%H)
+            MIN=$(date -u +%M)
+            if [[ "$HOUR" == "11" && "$MIN" == "30" ]]; then
+              echo "mode=digest" >> "$GITHUB_OUTPUT"
+            elif [[ "$HOUR" == "01" ]]; then
+              echo "mode=nightly" >> "$GITHUB_OUTPUT"
+            elif [[ "$HOUR" == "12" && "$MIN" == "00" ]]; then
+              # 12:00 UTC fires both followups + pipeline; pipeline wins (followups runs same DB anyway)
+              echo "mode=pipeline" >> "$GITHUB_OUTPUT"
+            else
+              echo "mode=pipeline" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Run pipeline mode
+        env:
+          USAJOBS_API_KEY: ${{ secrets.USAJOBS_API_KEY }}
+          USAJOBS_EMAIL: ${{ secrets.USAJOBS_EMAIL }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASS }}
+          SENDER_EMAIL: ${{ secrets.EMAIL_FROM }}
+          SENDER_PASSWORD: ${{ secrets.EMAIL_PASS }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+        run: |
+          python run.py --mode ${{ steps.mode.outputs.mode }}
+
+      - name: Save DB to cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/job_pipeline.db
+          key: job-db-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload pipeline log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-log-${{ github.run_id }}
+          path: data/pipeline.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Healthcheck ping
+        if: success() && env.HEALTHCHECK_URL != ''
+        env:
+          HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
+        run: |
+          curl -fsS --retry 3 -o /dev/null "$HEALTHCHECK_URL" || echo "healthcheck ping failed (non-fatal)"

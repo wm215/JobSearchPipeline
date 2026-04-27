@@ -17,6 +17,7 @@ import pickle
 from datetime import datetime, timedelta
 import sys
 import json
+import time
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -24,6 +25,12 @@ load_dotenv(os.path.expanduser('~/.env'))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sheets_helper import get_sheets_service, get_spreadsheet_id
+from config import (
+    OPENAI_BASE_BACKOFF_SECONDS,
+    OPENAI_MAX_CALLS_PER_RUN,
+    OPENAI_MAX_RETRIES,
+    OPENAI_MIN_SECONDS_BETWEEN_CALLS,
+)
 
 try:
     from google.auth.transport.requests import Request
@@ -194,6 +201,13 @@ class AccurateJobTracker:
         self.ai_extractions = 0
         self.regex_extractions = 0
         self.ai_disabled_reason = None
+        self.ai_request_count = 0
+        self.ai_rate_limit_events = 0
+        self.ai_last_call_ts = 0.0
+        self.ai_max_calls_per_run = OPENAI_MAX_CALLS_PER_RUN
+        self.ai_min_seconds_between_calls = OPENAI_MIN_SECONDS_BETWEEN_CALLS
+        self.ai_max_retries = OPENAI_MAX_RETRIES
+        self.ai_base_backoff_seconds = OPENAI_BASE_BACKOFF_SECONDS
         
         # Initialize OpenAI client if available
         if OPENAI_AVAILABLE:
@@ -416,12 +430,21 @@ class AccurateJobTracker:
         """
         if not self.ai_client:
             return None
-        
-        try:
-            # Truncate body to first 2000 chars to save tokens
-            body_snippet = body[:2000] if body else ""
-            
-            prompt = f"""Extract job application details from this email.
+        if self.ai_request_count >= self.ai_max_calls_per_run:
+            if not self.ai_disabled_reason:
+                self.ai_disabled_reason = (
+                    f"OpenAI call cap reached ({self.ai_max_calls_per_run} per run)"
+                )
+                print(
+                    f"⚠️  OPENAI_SKIPPED_RATE_LIMIT: {self.ai_disabled_reason}; "
+                    "using regex fallback only."
+                )
+            return None
+
+        # Truncate body to first 2000 chars to save tokens
+        body_snippet = body[:2000] if body else ""
+
+        prompt = f"""Extract job application details from this email.
 
 Subject: {subject}
 From: {sender}
@@ -441,41 +464,61 @@ Rules:
 - Clean position titles (remove "the", "a", etc.)
 - Return null for any field you're unsure about"""
 
-            response = self.ai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "You are a data extraction assistant. Return only valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0,
-                max_tokens=200
-            )
-            
-            result_text = response.choices[0].message.content.strip()
-            
-            # Parse JSON response
-            # Remove markdown code blocks if present
-            if result_text.startswith('```'):
-                result_text = re.sub(r'```json\n|\n```|```', '', result_text).strip()
-            
-            result = json.loads(result_text)
-            
-            # Check if it's a job application
-            if result.get('is_job_application') == False:
-                return {'is_job_application': False}
-            
-            self.ai_extractions += 1
-            return result
-            
-        except Exception as e:
-            err = str(e)
-            if 'insufficient_quota' in err or '429' in err:
-                self.ai_disabled_reason = "OpenAI quota exceeded"
-                self.ai_client = None
-                print("⚠️  AI extraction disabled for this run (quota exceeded); using regex fallback only.")
-            else:
+        for attempt in range(self.ai_max_retries + 1):
+            now = time.monotonic()
+            elapsed = now - self.ai_last_call_ts
+            if elapsed < self.ai_min_seconds_between_calls:
+                time.sleep(self.ai_min_seconds_between_calls - elapsed)
+
+            self.ai_request_count += 1
+            self.ai_last_call_ts = time.monotonic()
+
+            try:
+                response = self.ai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "You are a data extraction assistant. Return only valid JSON."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0,
+                    max_tokens=200,
+                )
+
+                result_text = response.choices[0].message.content.strip()
+                if result_text.startswith('```'):
+                    result_text = re.sub(r'```json\n|\n```|```', '', result_text).strip()
+
+                result = json.loads(result_text)
+                if result.get('is_job_application') is False:
+                    return {'is_job_application': False}
+
+                self.ai_extractions += 1
+                return result
+            except Exception as e:
+                err = str(e).lower()
+                if "insufficient_quota" in err:
+                    self.ai_disabled_reason = "OpenAI quota exceeded"
+                    self.ai_client = None
+                    print(
+                        "⚠️  OPENAI_SKIPPED_RATE_LIMIT: quota exceeded; "
+                        "using regex fallback only."
+                    )
+                    return None
+
+                is_rate_limit = ("429" in err) or ("rate limit" in err)
+                if is_rate_limit:
+                    self.ai_rate_limit_events += 1
+                    if attempt < self.ai_max_retries:
+                        wait_s = self.ai_base_backoff_seconds * (2 ** attempt)
+                        print(f"⚠️  OpenAI rate-limited, retrying in {wait_s:.1f}s...")
+                        time.sleep(wait_s)
+                        continue
+                    print("⚠️  OPENAI_SKIPPED_RATE_LIMIT: retries exhausted; using regex fallback.")
+                    return None
+
                 print(f"⚠️  AI extraction failed: {e}")
-            return None
+                return None
+        return None
 
     def extract_company_from_email(self, subject, body, sender):
         """
@@ -1140,13 +1183,15 @@ Rules:
             print(f"⚠️  Skipped {skipped} emails (invalid data)")
             
             # Show AI vs Regex stats
-            if self.ai_client:
-                total_extractions = self.ai_extractions + self.regex_extractions
-                if total_extractions > 0:
-                    ai_pct = (self.ai_extractions / total_extractions * 100)
-                    print(f"\n📊 Extraction Methods:")
-                    print(f"   🤖 AI: {self.ai_extractions} ({ai_pct:.1f}%)")
-                    print(f"   📝 Regex: {self.regex_extractions} ({100-ai_pct:.1f}%)")
+            total_extractions = self.ai_extractions + self.regex_extractions
+            if total_extractions > 0:
+                ai_pct = (self.ai_extractions / total_extractions * 100)
+                print(f"\n📊 Extraction Methods:")
+                print(f"   🤖 AI: {self.ai_extractions} ({ai_pct:.1f}%)")
+                print(f"   📝 Regex: {self.regex_extractions} ({100-ai_pct:.1f}%)")
+                print(f"   🔁 OpenAI rate-limit events: {self.ai_rate_limit_events}")
+                if self.ai_disabled_reason:
+                    print(f"   ⚠️  AI disabled reason: {self.ai_disabled_reason}")
             print()
 
             # Now update Google Sheets

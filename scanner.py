@@ -11,17 +11,13 @@ import logging
 import re
 import sqlite3
 import subprocess
-import time
 from typing import Any, Optional
 
 import requests
 
 from config import (
-    APIFY_API_TOKEN,
     AUTO_REFRESH_MIN_SAVED_ROWS,
     AUTO_REFRESH_SAVED_JOBS_FROM_CLIPBOARD,
-    INDEED_ACTOR,
-    INDEED_ACTOR_FALLBACKS,
     INDEED_KEYWORDS,
     INCLUDE_WASHINGTON_DC,
     JOBSPY_COUNTRY,
@@ -35,6 +31,7 @@ from config import (
     USAJOBS_API_KEY,
     USAJOBS_EMAIL,
     USAJOBS_SAVED_JOBS_SNAPSHOT,
+    USAJOBS_SERIES,
 )
 from db import generate_job_id, save_job
 from scoring import score_job
@@ -43,9 +40,6 @@ log = logging.getLogger("pipeline.scanner")
 
 _LAST_SCAN_META: dict[str, Any] = {
     "source_health": "not-run",
-    "indeed_attempts": 0,
-    "indeed_successes": 0,
-    "indeed_errors": {},
     "excluded_counts": {},
     "excluded_samples": [],
 }
@@ -94,6 +88,12 @@ def is_target_location(location: str) -> bool:
         return True
     if "washington" in loc and ("dc" in loc or "d.c." in loc):
         return INCLUDE_WASHINGTON_DC
+    # DC commuter zone — when DC is enabled, accept MD + VA suburbs
+    if INCLUDE_WASHINGTON_DC:
+        if any(c in loc for c in ("rockville", "bethesda", "silver spring", "gaithersburg",
+                                  "arlington, va", "alexandria, va", "tysons", "reston",
+                                  "mclean", "fairfax, va", ", md")):
+            return True
     if "chicago" in loc:
         # Reject known suburbs that are distinct cities, not Chicago proper
         for suburb in _CHICAGO_SUBURBS:
@@ -111,9 +111,6 @@ def get_last_scan_meta() -> dict[str, Any]:
 def _reset_scan_context() -> None:
     global _SCAN_CONTEXT
     _SCAN_CONTEXT = {
-        "indeed_attempts": 0,
-        "indeed_successes": 0,
-        "indeed_errors": {},
         "excluded_counts": {},
         "excluded_samples": [],
     }
@@ -134,18 +131,6 @@ def _record_exclusion(reason: str, job: dict | None = None) -> None:
                 "source": job.get("source", ""),
             }
         )
-
-
-def _record_indeed_error(code: str) -> None:
-    if _SCAN_CONTEXT is None:
-        return
-    errors = _SCAN_CONTEXT["indeed_errors"]
-    errors[code] = errors.get(code, 0) + 1
-
-
-def _extract_http_status(exc: Exception) -> str:
-    status = getattr(getattr(exc, "response", None), "status_code", None)
-    return str(status) if status is not None else "request_error"
 
 
 def _parse_salary_token(token: str) -> int:
@@ -264,34 +249,6 @@ def parse_usajobs_result(item: dict) -> dict:
         "salary_min": salary_min,
         "salary_max": salary_max,
         "sector": "Federal",
-    }
-
-
-def parse_indeed_result(item: dict) -> dict:
-    """
-    Parse a single Apify Indeed scraper result into a standard job dict.
-    """
-    title = item.get("positionName") or item.get("title", "")
-    company = item.get("company", "")
-    location = item.get("location", "")
-    url = item.get("url", "")
-    description = item.get("description", "")
-    salary_text = item.get("salary", "") or ""
-    posted_date = item.get("postedAt") or item.get("date", "")
-
-    salary_min, salary_max = extract_salary_from_text(salary_text)
-
-    return {
-        "title": title,
-        "company": company,
-        "location": location,
-        "url": url,
-        "source": "Indeed",
-        "description": description,
-        "posted_date": posted_date,
-        "salary_min": salary_min,
-        "salary_max": salary_max,
-        "sector": "Private",
     }
 
 
@@ -470,6 +427,9 @@ def scan_usajobs(conn: sqlite3.Connection, keyword: str, location: str) -> int:
         "LocationName": location,
         "ResultsPerPage": 50,
         "DatePosted": 7,
+        # Restrict to the 13 target occupational series so we catch jobs by
+        # classification (e.g. 1170 Realty) even when the title wording differs.
+        "JobCategoryCode": ";".join(USAJOBS_SERIES),
     }
 
     try:
@@ -521,174 +481,6 @@ def scan_usajobs(conn: sqlite3.Connection, keyword: str, location: str) -> int:
                 saved += 1
         except Exception as exc:
             log.warning("Failed to process USAJobs item: %s", exc)
-
-    return saved
-
-
-def scan_indeed_apify(conn: sqlite3.Connection, keyword: str, location: str) -> int:
-    """
-    Trigger an Apify Indeed scraper run for *keyword* + *location*, wait for
-    completion, score results, and save new listings to the database.
-
-    Returns the count of new jobs saved.
-    Logs a warning and returns 0 if APIFY_API_TOKEN is not configured.
-    """
-    if not APIFY_API_TOKEN:
-        log.warning("APIFY_API_TOKEN not set — skipping Indeed/Apify scan")
-        return 0
-
-    actors = [INDEED_ACTOR] + [a for a in INDEED_ACTOR_FALLBACKS if a != INDEED_ACTOR]
-    payload = {
-        "country": "US",
-        "location": location,
-        "keyword": keyword,
-        "limit": 25,
-        "datePosted": "week",
-    }
-
-    items: list[dict] = []
-    actor_used = ""
-    for actor in actors:
-        actor_id = actor.replace("/", "~")
-        run_url = f"https://api.apify.com/v2/acts/{actor_id}/runs?token={APIFY_API_TOKEN}"
-        if _SCAN_CONTEXT is not None:
-            _SCAN_CONTEXT["indeed_attempts"] += 1
-        try:
-            resp = requests.post(run_url, json=payload, timeout=30)
-            resp.raise_for_status()
-            run_data = resp.json()
-        except requests.RequestException as exc:
-            code = _extract_http_status(exc)
-            _record_indeed_error(code)
-            log.warning(
-                "Apify run start failed (%s) for '%s' / '%s' with actor '%s': %s",
-                code,
-                keyword,
-                location,
-                actor,
-                exc,
-            )
-            continue
-
-        run_id = run_data.get("data", {}).get("id", "")
-        if not run_id:
-            _record_indeed_error("missing_run_id")
-            log.warning(
-                "Apify returned no run_id for '%s' / '%s' with actor '%s'",
-                keyword,
-                location,
-                actor,
-            )
-            continue
-
-        log.info(
-            "Apify run started: %s (actor=%s, keyword=%s, location=%s)",
-            run_id,
-            actor,
-            keyword,
-            location,
-        )
-
-        status_url = f"https://api.apify.com/v2/actor-runs/{run_id}?token={APIFY_API_TOKEN}"
-        dataset_id: Optional[str] = None
-        deadline = time.time() + 120
-
-        while time.time() < deadline:
-            time.sleep(5)
-            try:
-                status_resp = requests.get(status_url, timeout=15)
-                status_resp.raise_for_status()
-                status_data = status_resp.json().get("data", {})
-            except requests.RequestException as exc:
-                log.warning("Apify status poll failed: %s", exc)
-                continue
-
-            run_status = status_data.get("status", "")
-            if run_status == "SUCCEEDED":
-                dataset_id = status_data.get("defaultDatasetId", "")
-                break
-            if run_status in ("FAILED", "ABORTED", "TIMED-OUT"):
-                _record_indeed_error(run_status.lower())
-                log.warning(
-                    "Apify run %s ended with status: %s (actor=%s)",
-                    run_id,
-                    run_status,
-                    actor,
-                )
-                dataset_id = None
-                break
-
-        if not dataset_id:
-            _record_indeed_error("timeout_or_no_dataset")
-            continue
-
-        items_url = f"https://api.apify.com/v2/datasets/{dataset_id}/items?token={APIFY_API_TOKEN}"
-        try:
-            items_resp = requests.get(items_url, timeout=30)
-            items_resp.raise_for_status()
-            maybe_items = items_resp.json()
-            items = maybe_items if isinstance(maybe_items, list) else []
-            actor_used = actor
-            if _SCAN_CONTEXT is not None:
-                _SCAN_CONTEXT["indeed_successes"] += 1
-            break
-        except requests.RequestException as exc:
-            code = _extract_http_status(exc)
-            _record_indeed_error(code)
-            log.warning(
-                "Apify dataset fetch failed for run %s (actor=%s, code=%s): %s",
-                run_id,
-                actor,
-                code,
-                exc,
-            )
-
-    if not items and actors:
-        log.warning(
-            "Indeed scan exhausted all actors for '%s' / '%s' (%d attempts)",
-            keyword,
-            location,
-            len(actors),
-        )
-        return 0
-
-    log.info(
-        "Apify '%s' @ '%s' via '%s': %d results",
-        keyword,
-        location,
-        actor_used or INDEED_ACTOR,
-        len(items),
-    )
-
-    saved = 0
-    for item in items:
-        try:
-            job = parse_indeed_result(item)
-            if not is_target_location(job["location"]):
-                _record_exclusion("location", job)
-                continue
-            result = score_job(
-                job["title"],
-                job["description"],
-                job["company"],
-                job["location"],
-                job["salary_min"],
-                job["salary_max"],
-            )
-            if result["total_score"] <= 0:
-                _record_exclusion("disqualified", job)
-                continue
-            if result["total_score"] < 55:
-                _record_exclusion("low_score", job)
-            job["match_score"] = result["total_score"]
-            job["score_breakdown"] = result["breakdown"]
-            job["job_id"] = generate_job_id(
-                job["title"], job["company"], job["location"], job["url"]
-            )
-            if save_job(conn, job):
-                saved += 1
-        except Exception as exc:
-            log.warning("Failed to process Indeed item: %s", exc)
 
     return saved
 
@@ -1107,6 +899,407 @@ def import_pha_jobs(conn: sqlite3.Connection) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Workday CXS API — generic scraper for employers that host on Workday
+# ---------------------------------------------------------------------------
+#
+# Workday's "Career Experience Service" exposes a public JSON POST endpoint:
+#   https://<company>.<region>.myworkdayjobs.com/wday/cxs/<company>/<site_id>/jobs
+# The body is JSON: {"appliedFacets":{}, "limit":20, "offset":0, "searchText":"..."}
+# Response has `jobPostings: [{title, externalPath, locationsText, postedOn, ...}]`.
+# Full posting URL = <base_url> + <externalPath>.
+#
+# Site IDs below are the public careers-site names for each employer.
+
+# (display_name, base_url, site_id, sector)
+# Site IDs verified by direct probe 2026-04-26.  Endpoints that returned 422
+# on every reasonable payload (GDIT, Deloitte) are commented out — they appear
+# to require non-standard request structure or auth and aren't worth the
+# every-2-hour noise until someone reverse-engineers them.
+_WORKDAY_TARGETS: list[tuple[str, str, str, str]] = [
+    ("Fannie Mae",            "https://fanniemae.wd1.myworkdayjobs.com",  "FannieMaeCareers", "GSE"),
+    ("Freddie Mac",           "https://freddiemac.wd5.myworkdayjobs.com", "External",         "GSE"),
+    ("Booz Allen Hamilton",   "https://bah.wd1.myworkdayjobs.com",        "BAH_Jobs",         "Private"),
+    ("MITRE Corporation",     "https://mitre.wd5.myworkdayjobs.com",      "MITRE",            "Private"),
+    # GDIT — 422 on every site_id tried (External, GDIT, GDIT_External, …)
+    # ("General Dynamics IT", "https://gdit.wd5.myworkdayjobs.com",       "External",         "Private"),
+    # Deloitte — 422 on every site_id tried (External, DeloitteUS, …)
+    # ("Deloitte",            "https://deloitte.wd103.myworkdayjobs.com", "External",         "Private"),
+]
+
+# Cap to keep per-cycle runtime sane (called every 2h).
+_WORKDAY_KEYWORD_LIMIT = 3
+_WORKDAY_RESULTS_PER_QUERY = 20
+
+
+def _workday_cxs_url(base_url: str, company_slug: str, site_id: str) -> str:
+    return f"{base_url}/wday/cxs/{company_slug}/{site_id}/jobs"
+
+
+def scan_workday(conn: sqlite3.Connection) -> int:
+    """
+    Query the Workday CXS public JSON API for each configured employer using
+    the first few INDEED_KEYWORDS as search terms.  Returns count of new jobs
+    saved across all (employer × keyword) combinations.
+
+    Each (employer, keyword) request is wrapped in try/except so a single
+    failure (auth wall, schema change, 5xx) cannot kill the rest of the scan.
+    """
+    keywords = INDEED_KEYWORDS[:_WORKDAY_KEYWORD_LIMIT]
+    saved_total = 0
+
+    for display_name, base_url, site_id, sector in _WORKDAY_TARGETS:
+        # Company slug is the first DNS label, e.g. "fanniemae" from
+        # "https://fanniemae.wd1.myworkdayjobs.com".
+        try:
+            company_slug = base_url.split("//", 1)[1].split(".", 1)[0]
+        except (IndexError, AttributeError):
+            log.warning("Workday: could not derive slug from %s", base_url)
+            continue
+
+        cxs_url = _workday_cxs_url(base_url, company_slug, site_id)
+
+        for keyword in keywords:
+            try:
+                payload = {
+                    "appliedFacets": {},
+                    "limit": _WORKDAY_RESULTS_PER_QUERY,
+                    "offset": 0,
+                    "searchText": keyword,
+                }
+                resp = requests.post(
+                    cxs_url,
+                    json=payload,
+                    headers={
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            except (requests.RequestException, ValueError) as exc:
+                log.warning("Workday %s '%s' failed: %s", display_name, keyword, exc)
+                continue
+
+            postings = data.get("jobPostings", []) or []
+            log.info(
+                "Workday %s '%s' → %d postings",
+                display_name,
+                keyword,
+                len(postings),
+            )
+
+            for p in postings:
+                try:
+                    title = (p.get("title") or "").strip()
+                    external_path = p.get("externalPath") or ""
+                    location = (p.get("locationsText") or "").strip()
+                    posted_date = (p.get("postedOn") or "").strip()
+                    if not title or not external_path:
+                        continue
+
+                    url = base_url + external_path
+
+                    if not is_target_location(location):
+                        _record_exclusion(
+                            "location",
+                            {
+                                "title": title,
+                                "company": display_name,
+                                "location": location,
+                                "source": "Workday",
+                            },
+                        )
+                        continue
+
+                    result = score_job(title, "", display_name, location, None, None)
+                    if result["total_score"] <= 0:
+                        _record_exclusion(
+                            "disqualified",
+                            {
+                                "title": title,
+                                "company": display_name,
+                                "location": location,
+                                "source": "Workday",
+                            },
+                        )
+                        continue
+                    if result["total_score"] < 55:
+                        _record_exclusion(
+                            "low_score",
+                            {
+                                "title": title,
+                                "company": display_name,
+                                "location": location,
+                                "source": "Workday",
+                            },
+                        )
+
+                    job = {
+                        "title": title,
+                        "company": display_name,
+                        "location": location,
+                        "url": url,
+                        "source": "Workday",
+                        "description": "",
+                        "posted_date": posted_date,
+                        "salary_min": None,
+                        "salary_max": None,
+                        "sector": sector,
+                        "match_score": result["total_score"],
+                        "score_breakdown": result["breakdown"],
+                        "job_id": generate_job_id(title, display_name, location, url),
+                    }
+                    if save_job(conn, job):
+                        saved_total += 1
+                except Exception as exc:  # noqa: BLE001 — never let one bad row kill the loop
+                    log.warning(
+                        "Workday %s row error (%s): %s",
+                        display_name,
+                        p.get("title", "?"),
+                        exc,
+                    )
+                    continue
+
+    return saved_total
+
+
+# ---------------------------------------------------------------------------
+# Greenhouse public boards API — nonprofits / think tanks / advocacy orgs
+# ---------------------------------------------------------------------------
+#
+# Greenhouse exposes a free, unauthenticated JSON board for any employer:
+#   https://boards-api.greenhouse.io/v1/boards/<slug>/jobs?content=true
+# Response shape: {"jobs": [{title, absolute_url, location: {name}, content,
+# updated_at, company_name, ...}]}.  `content` is HTML — we pass it straight
+# into score_job, the keyword matcher tolerates tags fine.
+
+# (display_name, greenhouse_slug, sector)
+_GREENHOUSE_ORGS: list[tuple[str, str, str]] = [
+    ("Local Initiatives Support Corporation", "lisc",            "Nonprofit"),
+    ("ACLU - National Office",                "aclu",            "Nonprofit"),
+    ("Code for America",                      "codeforamerica",  "Nonprofit"),
+    ("Democracy Forward",                     "democracyforward","Nonprofit"),
+    ("World Resources Institute",             "wri",             "Nonprofit"),
+]
+
+
+def scan_greenhouse(conn: sqlite3.Connection) -> int:
+    """
+    Query the public Greenhouse boards API for each configured employer,
+    score and save each posting. Each org is wrapped in try/except so one
+    failure can't kill the rest.
+    """
+    saved_total = 0
+    for display_name, slug, sector in _GREENHOUSE_ORGS:
+        try:
+            resp = requests.get(
+                f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true",
+                timeout=30,
+            )
+            if not resp.ok:
+                log.warning("Greenhouse %s: HTTP %s", display_name, resp.status_code)
+                continue
+            postings = resp.json().get("jobs", []) or []
+        except (requests.RequestException, ValueError) as exc:
+            log.warning("Greenhouse %s failed: %s", display_name, exc)
+            continue
+
+        log.info("Greenhouse %s → %d postings", display_name, len(postings))
+        for p in postings:
+            try:
+                title = (p.get("title") or "").strip()
+                url = p.get("absolute_url") or ""
+                location = ((p.get("location") or {}).get("name") or "").strip()
+                description = p.get("content") or ""
+                posted_date = (p.get("updated_at") or p.get("first_published") or "")[:10]
+                if not title or not url:
+                    continue
+
+                base = {
+                    "title": title,
+                    "company": display_name,
+                    "location": location,
+                    "source": "Greenhouse",
+                }
+                if not is_target_location(location):
+                    _record_exclusion("location", base)
+                    continue
+
+                result = score_job(title, description, display_name, location, None, None)
+                if result["total_score"] <= 0:
+                    _record_exclusion("disqualified", base)
+                    continue
+                if result["total_score"] < 55:
+                    _record_exclusion("low_score", base)
+
+                job = {
+                    **base,
+                    "url": url,
+                    "description": description,
+                    "posted_date": posted_date,
+                    "salary_min": None,
+                    "salary_max": None,
+                    "sector": sector,
+                    "match_score": result["total_score"],
+                    "score_breakdown": result["breakdown"],
+                    "job_id": generate_job_id(title, display_name, location, url),
+                }
+                if save_job(conn, job):
+                    saved_total += 1
+            except Exception as exc:  # noqa: BLE001 — never let one bad row kill the loop
+                log.warning("Greenhouse %s row error: %s", display_name, exc)
+                continue
+
+    return saved_total
+
+
+# ---------------------------------------------------------------------------
+# GovernmentJobs.com / NeoGov agency portals
+# ---------------------------------------------------------------------------
+# GET /careers/<folder> (seeds ASP.NET session) -> GET /careers/home/index
+# ?agency=<folder>&page=1 (XHR) returns HTML fragment of
+# <li class="list-item" data-job-id="..."> blocks. Split on opening tag (not
+# </li>) because list-meta has nested <li> children.
+_GOVJOBS_AGENCIES: list[tuple[str, str]] = [
+    ("State of New Jersey",         "newjersey"),
+    ("State of Delaware",           "delaware"),
+    ("State of Illinois",           "illinois"),
+    ("Commonwealth of Virginia",    "virginia"),
+    ("Montgomery County, MD",       "montgomerycountymd"),
+    ("City of Philadelphia (alt)",  "philadelphia"),
+]
+
+_GOVJOBS_BASE = "https://www.governmentjobs.com"
+_GOVJOBS_OPEN_RE = re.compile(r'<li[^>]*class="[^"]*list-item[^"]*"[^>]*data-job-id="(\d+)"[^>]*>', re.DOTALL)
+_GOVJOBS_LINK_RE = re.compile(r'<a[^>]+class="[^"]*item-details-link[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>', re.DOTALL)
+_GOVJOBS_META_RE = re.compile(r'<ul[^>]+class="[^"]*list-meta[^"]*"[^>]*>(.*?)</ul>', re.DOTALL)
+_GOVJOBS_LI_RE = re.compile(r'<li[^>]*>(.*?)</li>', re.DOTALL)
+_GOVJOBS_DESC_RE = re.compile(r'<div[^>]+class="[^"]*list-entry[^"]*"[^>]*>(.*?)</div>', re.DOTALL)
+_HTML_TAG_RE = re.compile(r'<[^>]+>')
+
+
+def _govjobs_clean(text: str) -> str:
+    return re.sub(r'\s+', ' ', _HTML_TAG_RE.sub(' ', text or '')).strip()
+
+
+def _parse_governmentjobs_html(html: str, agency_folder: str) -> list[dict]:
+    """Parse a GovernmentJobs.com job-list HTML fragment into raw job dicts."""
+    rows: list[dict] = []
+    matches = list(_GOVJOBS_OPEN_RE.finditer(html or ""))
+    for idx, m in enumerate(matches):
+        start = m.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(html)
+        block = html[start:end]
+
+        link_m = _GOVJOBS_LINK_RE.search(block)
+        if not link_m:
+            continue
+        href = link_m.group(1).strip()
+        title = _govjobs_clean(link_m.group(2))
+        if not title:
+            continue
+        url = href if href.startswith("http") else _GOVJOBS_BASE + href
+
+        meta_m = _GOVJOBS_META_RE.search(block)
+        meta_items = [_govjobs_clean(li) for li in _GOVJOBS_LI_RE.findall(meta_m.group(1))] if meta_m else []
+        meta_items = [x for x in meta_items if x]
+        location = meta_items[0] if meta_items else ""
+        meta_blob = " | ".join(meta_items)
+        salary_min, salary_max = extract_salary_from_text(meta_blob)
+
+        desc_m = _GOVJOBS_DESC_RE.search(block)
+        description = _govjobs_clean(desc_m.group(1)) if desc_m else ""
+
+        rows.append({
+            "title": title,
+            "location": location,
+            "url": url,
+            "description": (description + " | " + meta_blob).strip(" |"),
+            "salary_min": salary_min,
+            "salary_max": salary_max,
+        })
+    return rows
+
+
+def scan_governmentjobs(conn: sqlite3.Connection) -> int:
+    """
+    Scrape NeoGov agency portals on governmentjobs.com.  Each agency is wrapped
+    in try/except so one failure can't kill the others.  Folders that redirect
+    to the marketing home (e.g. invalid agency slugs) quietly yield zero jobs.
+    """
+    saved_total = 0
+    for display_name, folder in _GOVJOBS_AGENCIES:
+        landing_url = f"{_GOVJOBS_BASE}/careers/{folder}"
+        listing_url = (
+            f"{_GOVJOBS_BASE}/careers/home/index"
+            f"?agency={folder}&page=1&sort=PostingDate&isDescendingSort=true"
+        )
+        try:
+            session = requests.Session()
+            session.get(landing_url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+            resp = session.get(
+                listing_url,
+                timeout=30,
+                headers={
+                    "User-Agent": "Mozilla/5.0",
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Referer": landing_url,
+                    "Accept": "text/html,*/*",
+                },
+            )
+            resp.raise_for_status()
+            html = resp.text or ""
+        except (requests.RequestException, ValueError) as exc:
+            log.warning("GovernmentJobs %s failed: %s", display_name, exc)
+            continue
+
+        parsed = _parse_governmentjobs_html(html, folder)
+        log.info("GovernmentJobs %s → %d postings", display_name, len(parsed))
+
+        for raw in parsed:
+            try:
+                base = {
+                    "title": raw["title"], "company": display_name,
+                    "location": raw["location"], "source": "GovernmentJobs",
+                }
+                if not is_target_location(raw["location"]):
+                    _record_exclusion("location", base)
+                    continue
+
+                result = score_job(
+                    raw["title"], raw["description"], display_name,
+                    raw["location"], raw["salary_min"], raw["salary_max"],
+                )
+                if result["total_score"] <= 0:
+                    _record_exclusion("disqualified", base)
+                    continue
+                if result["total_score"] < 55:
+                    _record_exclusion("low_score", base)
+
+                job = {
+                    **base,
+                    "url": raw["url"],
+                    "description": raw["description"],
+                    "posted_date": "",
+                    "salary_min": raw["salary_min"],
+                    "salary_max": raw["salary_max"],
+                    "sector": "Government",
+                    "match_score": result["total_score"],
+                    "score_breakdown": result["breakdown"],
+                    "job_id": generate_job_id(
+                        raw["title"], display_name, raw["location"], raw["url"]),
+                }
+                if save_job(conn, job):
+                    saved_total += 1
+            except Exception as exc:  # noqa: BLE001 — never let one bad row kill the loop
+                log.warning("GovernmentJobs %s row error: %s", display_name, exc)
+                continue
+
+    return saved_total
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -1116,6 +1309,13 @@ _USAJOBS_KEYWORDS: list[str] = [
     "Management Analyst",
     "Housing Specialist",
     "Policy Analyst",
+    # Added 2026-04-20: widen the federal funnel
+    "Grants Management",
+    "Acquisition Specialist",
+    "Government Affairs",
+    "Program Director",
+    "Inspector General",
+    "Realty Specialist",
 ]
 
 
@@ -1155,6 +1355,18 @@ def run_scan(conn: sqlite3.Connection) -> int:
     log.info("  PHDC careers → %d new", count)
     total += count
 
+    # --- GovernmentJobs.com / NeoGov agency portals (NJ, DE, Cook County, DC) ---
+    log.info("Starting GovernmentJobs scan (%d agencies)", len(_GOVJOBS_AGENCIES))
+    count = scan_governmentjobs(conn)
+    log.info("  GovernmentJobs → %d new", count)
+    total += count
+
+    # --- Greenhouse public boards (LISC, ACLU, CfA, Democracy Forward, WRI) ---
+    log.info("Starting Greenhouse scan (%d orgs)", len(_GREENHOUSE_ORGS))
+    count = scan_greenhouse(conn)
+    log.info("  Greenhouse → %d new", count)
+    total += count
+
     # --- USAJobs API ---
     log.info("Starting USAJobs scan (%d keywords × %d locations)", len(_USAJOBS_KEYWORDS), len(locations))
     for keyword in _USAJOBS_KEYWORDS:
@@ -1169,27 +1381,17 @@ def run_scan(conn: sqlite3.Connection) -> int:
     log.info("  jobspy (Indeed + LinkedIn) → %d new", count)
     total += count
 
-    indeed_attempts = int((_SCAN_CONTEXT or {}).get("indeed_attempts", 0))
-    indeed_successes = int((_SCAN_CONTEXT or {}).get("indeed_successes", 0))
-    indeed_errors = dict((_SCAN_CONTEXT or {}).get("indeed_errors", {}))
+    # --- Workday CXS API (Fannie, Freddie, BAH, MITRE, GDIT, Deloitte) ---
+    log.info("Starting Workday scan (%d employers)", len(_WORKDAY_TARGETS))
+    count = scan_workday(conn)
+    log.info("  Workday → %d new", count)
+    total += count
+
     excluded_counts = dict((_SCAN_CONTEXT or {}).get("excluded_counts", {}))
     excluded_samples = list((_SCAN_CONTEXT or {}).get("excluded_samples", []))
 
-    if indeed_attempts == 0:
-        source_health = "Indeed not attempted"
-    elif indeed_successes == indeed_attempts:
-        source_health = f"Indeed healthy ({indeed_successes}/{indeed_attempts})"
-    else:
-        top_error = max(indeed_errors.items(), key=lambda it: it[1])[0] if indeed_errors else "unknown"
-        source_health = (
-            f"Indeed degraded ({indeed_successes}/{indeed_attempts} ok, top error: {top_error})"
-        )
-
     _LAST_SCAN_META = {
-        "source_health": source_health,
-        "indeed_attempts": indeed_attempts,
-        "indeed_successes": indeed_successes,
-        "indeed_errors": indeed_errors,
+        "source_health": "jobspy + USAJobs active",
         "excluded_counts": excluded_counts,
         "excluded_samples": excluded_samples,
     }
@@ -1197,7 +1399,6 @@ def run_scan(conn: sqlite3.Connection) -> int:
         log.info("Excluded jobs by reason: %s", excluded_counts)
     if excluded_samples:
         log.info("Excluded samples: %s", excluded_samples[:5])
-    log.info("Source health: %s", source_health)
 
     log.info("Scan complete — %d new jobs saved total", total)
     return total

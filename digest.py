@@ -96,13 +96,15 @@ def get_emails_by_query(service, query, max_results=20):
     return emails
 
 
-def generate_digest_html(starred, jobs_hot, jobs_active_unread, followups_due):
+def generate_digest_html(starred, jobs_hot, jobs_active_unread, followups_due, top_jobs=None):
     """Generate beautiful ADHD-optimized HTML digest"""
+    top_jobs = top_jobs or []
 
     today = datetime.now().strftime('%A, %B %d')
 
-    # Count totals
-    total_action = len(starred) + len(jobs_hot)
+    # Count totals — urgent follow-ups (21+ days) count as action items
+    urgent_followups = sum(1 for f in followups_due if f.get('days', 0) >= 21)
+    total_action = len(starred) + len(jobs_hot) + urgent_followups
     total_updates = len(jobs_active_unread)
     total_followups = len(followups_due)
 
@@ -313,6 +315,33 @@ def generate_digest_html(starred, jobs_hot, jobs_active_unread, followups_due):
             </div>
     """
 
+    # Top Jobs Today section — sits right under the summary cards so it's the
+    # first thing William sees every morning. Pulled from job_pipeline.db.
+    if top_jobs:
+        html += """
+            <div class="section" style="background:#fffbeb;border-left:4px solid #f59e0b;">
+                <div class="section-title" style="color:#b45309;">🎯 TOP JOBS TODAY</div>
+        """
+        for job in top_jobs:
+            score = int(job.get("match_score", 0))
+            score_color = "#dc2626" if score >= 95 else "#ea580c" if score >= 85 else "#f59e0b"
+            title = job.get("title") or "(no title)"
+            company = job.get("company") or "—"
+            location = job.get("location") or "—"
+            url = job.get("url") or "#"
+            html += f"""
+                <div class="email-card" style="border-left-color:{score_color};">
+                    <div style="display:flex;align-items:flex-start;gap:12px;">
+                        <div style="font-size:22px;font-weight:700;color:{score_color};min-width:40px;">{score}</div>
+                        <div style="flex:1;">
+                            <a href="{url}" style="color:#1e40af;text-decoration:none;font-weight:600;font-size:15px;">{title}</a>
+                            <div style="color:#64748b;font-size:13px;margin-top:2px;">{company} • {location}</div>
+                        </div>
+                    </div>
+                </div>
+            """
+        html += "</div>"
+
     # Starred emails section
     if starred:
         html += """
@@ -407,6 +436,54 @@ def generate_digest_html(starred, jobs_hot, jobs_active_unread, followups_due):
     return html
 
 
+def get_top_jobs_today(n: int = 3) -> list[dict]:
+    """Return the top N unnotified TOP_MATCH jobs from the pipeline DB."""
+    import sqlite3
+    from pathlib import Path
+    db_path = Path(__file__).parent / "data" / "job_pipeline.db"
+    if not db_path.exists():
+        return []
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT job_id, title, company, location, match_score, url, source
+            FROM jobs
+            WHERE match_score >= 75 AND notified = 0 AND applied = 0
+            ORDER BY match_score DESC, found_date DESC
+            LIMIT ?
+            """,
+            (n,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"   ⚠️ Could not get top jobs: {e}")
+        return []
+
+
+def mark_jobs_notified(job_ids: list[str]) -> None:
+    """Flag the given job_ids as notified so they don't re-surface."""
+    if not job_ids:
+        return
+    import sqlite3
+    from pathlib import Path
+    db_path = Path(__file__).parent / "data" / "job_pipeline.db"
+    if not db_path.exists():
+        return
+    try:
+        conn = sqlite3.connect(str(db_path))
+        placeholders = ",".join("?" * len(job_ids))
+        conn.execute(
+            f"UPDATE jobs SET notified = 1 WHERE job_id IN ({placeholders})",
+            job_ids,
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"   ⚠️ Could not mark jobs notified: {e}")
+
+
 def get_followups_due():
     """Get follow-ups from job tracker Google Sheet"""
     try:
@@ -439,7 +516,7 @@ def get_followups_due():
 
             try:
                 days = int(days_str) if days_str else 0
-                if days >= 14:
+                if 14 <= days <= 90:
                     followups.append({
                         'company': row[1] if len(row) > 1 else 'Unknown',
                         'position': row[2] if len(row) > 2 else 'Unknown',
@@ -490,10 +567,13 @@ def send_digest_email(html_content):
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(email_from, email_pass)
             server.sendmail(email_from, email_to, msg.as_string())
-        return True
     except Exception as e:
         print(f"❌ Failed to send email: {e}")
         return False
+
+    from inbox_rescue import rescue_to_inbox
+    rescue_to_inbox(msg['Subject'])
+    return True
 
 
 def main():
@@ -527,16 +607,26 @@ def main():
     print("⏰ Getting follow-ups from job tracker...")
     followups_due = get_followups_due()
     print(f"   Found {len(followups_due)} applications needing follow-up")
+
+    # Get top jobs today from the pipeline DB
+    print("🎯 Getting top jobs today...")
+    top_jobs = get_top_jobs_today(n=3)
+    print(f"   Found {len(top_jobs)} new TOP_MATCH job(s) to surface")
     print()
 
     # Generate HTML
     print("📝 Generating digest...")
-    html = generate_digest_html(starred, jobs_hot, jobs_active_unread, followups_due)
+    html = generate_digest_html(starred, jobs_hot, jobs_active_unread, followups_due, top_jobs)
 
     # Send email
     print("📧 Sending digest email...")
     if send_digest_email(html):
         print("   ✅ Digest sent successfully!")
+        # Mark the surfaced top jobs as notified so they don't reappear tomorrow
+        job_ids = [j["job_id"] for j in top_jobs if j.get("job_id")]
+        if job_ids:
+            mark_jobs_notified(job_ids)
+            print(f"   ✅ Marked {len(job_ids)} jobs as notified")
     else:
         print("   ❌ Failed to send digest")
 

@@ -85,13 +85,15 @@ def test_pipeline_scan_returns_zero_without_keys(tmp_path):
     conn = init_db(db_path)
     try:
         with mock.patch("scanner.USAJOBS_API_KEY", ""), \
-             mock.patch("scanner.APIFY_API_TOKEN", ""), \
              mock.patch("scanner.AUTO_REFRESH_SAVED_JOBS_FROM_CLIPBOARD", False), \
              mock.patch("scanner.USAJOBS_SAVED_JOBS_SNAPSHOT", pathlib.Path(tmp_path / "missing_saved_jobs.txt")), \
              mock.patch("scanner.PHA_CAREERS_SNAPSHOT", pathlib.Path(tmp_path / "missing_pha.txt")), \
              mock.patch("scanner.scan_city_smartrecruiters", return_value=0), \
              mock.patch("scanner.scan_phdc_careers", return_value=0), \
-             mock.patch("scanner.scan_jobspy", return_value=0):
+             mock.patch("scanner.scan_greenhouse", return_value=0), \
+             mock.patch("scanner.scan_governmentjobs", return_value=0), \
+             mock.patch("scanner.scan_jobspy", return_value=0), \
+             mock.patch("scanner.scan_workday", return_value=0):
             count = run_scan(conn)
         assert count == 0
     finally:

@@ -24,8 +24,10 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import (
+    APPLY_NOW_THRESHOLD,
     DB_PATH,
     ERROR_LOG_PATH,
+    INCLUDE_WASHINGTON_DC,
     LOG_PATH,
 )
 from db import (
@@ -39,7 +41,7 @@ from emailer import send_digest, send_error_email
 from networker import run_network
 from preparer import run_prepare
 from researcher import run_research
-from scanner import run_scan
+from scanner import get_last_scan_meta, run_scan
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -61,37 +63,44 @@ log = logging.getLogger("pipeline.run")
 # Digest query helpers
 # ---------------------------------------------------------------------------
 
-_TARGET_LOCATION_SQL = """
-(
-    lower(location) LIKE '%philadelphia%'
-    OR lower(location) LIKE '%philly%'
-    OR lower(location) LIKE '%new jersey%'
-    OR lower(location) LIKE '%, nj%'
-    OR lower(location) LIKE '%delaware%'
-    OR lower(location) LIKE '%, de%'
-    OR lower(location) LIKE '%washington%dc%'
-    OR lower(location) LIKE '%washington%d.c.%'
-    OR lower(location) LIKE '%chicago%'
-    OR lower(location) LIKE '%remote%'
-    OR lower(location) LIKE '%telework%'
-    OR lower(location) LIKE '%multiple locations%'
-    OR lower(location) LIKE '%location negotiable%'
-)
-"""
+def _target_location_sql() -> str:
+    dc_clause = (
+        "OR lower(location) LIKE '%washington%dc%' "
+        "OR lower(location) LIKE '%washington%d.c.%'"
+        if INCLUDE_WASHINGTON_DC
+        else ""
+    )
+    return f"""
+    (
+        lower(location) LIKE '%philadelphia%'
+        OR lower(location) LIKE '%philly%'
+        OR lower(location) LIKE '%new jersey%'
+        OR lower(location) LIKE '%, nj%'
+        OR lower(location) LIKE '%delaware%'
+        OR lower(location) LIKE '%, de%'
+        {dc_clause}
+        OR lower(location) LIKE '%chicago%'
+        OR lower(location) LIKE '%remote%'
+        OR lower(location) LIKE '%telework%'
+        OR lower(location) LIKE '%multiple locations%'
+        OR lower(location) LIKE '%location negotiable%'
+    )
+    """
 
 
 def _query_new_jobs(conn, limit: int = 20) -> list[dict]:
     """
-    Return jobs with match_score >= 75 found in the last 24 hours.
-    Falls back to top unapplied jobs if none found today.
+    Return unnotified TOP_MATCH jobs (score >= 75, not yet emailed, not yet applied).
+    Falls back to unnotified REVIEW jobs if no TOP_MATCH pending.
     """
     rows = conn.execute(
         f"""
-        SELECT title, company, location, match_score, url, source
+        SELECT job_id, title, company, location, match_score, url, source
         FROM jobs
         WHERE match_score >= 75
-          AND found_date >= datetime('now', '-1 day', 'utc')
-          AND {_TARGET_LOCATION_SQL}
+          AND notified = 0
+          AND applied = 0
+          AND {_target_location_sql()}
         ORDER BY match_score DESC
         LIMIT ?
         """,
@@ -99,13 +108,14 @@ def _query_new_jobs(conn, limit: int = 20) -> list[dict]:
     ).fetchall()
 
     if not rows:
-        # Fallback: top unapplied jobs regardless of date
         rows = conn.execute(
             f"""
-            SELECT title, company, location, match_score, url, source
+            SELECT job_id, title, company, location, match_score, url, source
             FROM jobs
-            WHERE applied = 0 AND match_score >= 55
-              AND {_TARGET_LOCATION_SQL}
+            WHERE match_score >= 55
+              AND notified = 0
+              AND applied = 0
+              AND {_target_location_sql()}
             ORDER BY match_score DESC
             LIMIT ?
             """,
@@ -122,11 +132,36 @@ def _query_recent_research(conn, limit: int = 10) -> list[dict]:
         SELECT j.title, j.company, r.talking_points
         FROM job_research r
         INNER JOIN jobs j ON r.job_id = j.job_id
-        WHERE {_TARGET_LOCATION_SQL}
+        WHERE {_target_location_sql()}
         ORDER BY r.created_at DESC
         LIMIT ?
         """,
         (limit,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _query_apply_now(conn, limit: int = 10) -> list[dict]:
+    """
+    Return high-score, unapplied jobs to take action on now.
+    """
+    rows = conn.execute(
+        f"""
+        SELECT title, company, location, match_score, url, source, posted_date
+        FROM jobs
+        WHERE applied = 0
+          AND match_score >= ?
+          AND {_target_location_sql()}
+        ORDER BY
+          CASE
+            WHEN posted_date GLOB '__/__/____'
+            THEN date(substr(posted_date, 7, 4) || '-' || substr(posted_date, 1, 2) || '-' || substr(posted_date, 4, 2))
+            ELSE NULL
+          END ASC,
+          match_score DESC
+        LIMIT ?
+        """,
+        (APPLY_NOW_THRESHOLD, limit),
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -138,7 +173,7 @@ def _query_cover_letters(conn, limit: int = 10) -> list[dict]:
         SELECT j.title, j.company, a.cover_letter
         FROM job_applications a
         INNER JOIN jobs j ON a.job_id = j.job_id
-        WHERE {_TARGET_LOCATION_SQL}
+        WHERE {_target_location_sql()}
         ORDER BY a.created_at DESC
         LIMIT ?
         """,
@@ -166,7 +201,7 @@ def _build_stats(conn) -> dict:
     """Query aggregate stats for the digest stats bar."""
     total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
     new = conn.execute(
-        f"SELECT COUNT(*) FROM jobs WHERE found_date >= datetime('now', '-1 day', 'utc') AND {_TARGET_LOCATION_SQL}"
+        f"SELECT COUNT(*) FROM jobs WHERE found_date >= datetime('now', '-1 day', 'utc') AND {_target_location_sql()}"
     ).fetchone()[0]
     researched = conn.execute(
         f"""
@@ -174,7 +209,7 @@ def _build_stats(conn) -> dict:
         FROM job_research r
         INNER JOIN jobs j ON r.job_id = j.job_id
         WHERE r.created_at >= datetime('now', '-1 day', 'utc')
-          AND {_TARGET_LOCATION_SQL}
+          AND {_target_location_sql()}
         """
     ).fetchone()[0]
     prepared = conn.execute(
@@ -183,7 +218,7 @@ def _build_stats(conn) -> dict:
         FROM job_applications a
         INNER JOIN jobs j ON a.job_id = j.job_id
         WHERE a.created_at >= datetime('now', '-1 day', 'utc')
-          AND {_TARGET_LOCATION_SQL}
+          AND {_target_location_sql()}
         """
     ).fetchone()[0]
     leads = conn.execute(
@@ -204,6 +239,21 @@ def _build_stats(conn) -> dict:
         "leads": leads,
         "total": total,
     }
+
+
+def _build_health_note(scan_meta: dict, stats: dict) -> str:
+    excluded = scan_meta.get("excluded_counts") or {}
+    ex_parts = []
+    for reason in ("location", "disqualified", "low_score"):
+        if excluded.get(reason):
+            ex_parts.append(f"{reason}:{excluded[reason]}")
+    ex_str = ", ".join(ex_parts) if ex_parts else "none"
+    source_health = scan_meta.get("source_health", "unknown")
+    return (
+        f"Health: {source_health} | "
+        f"Scanned:{stats.get('scanned', 0)} New:{stats.get('new', 0)} | "
+        f"Excluded {ex_str}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +279,7 @@ def run_pipeline() -> int:
         # Stage 1: Scan
         log.info("Stage 1: scan")
         jobs_found = run_scan(conn)
+        scan_meta = get_last_scan_meta()
         update_pipeline_stage(conn, run_id, "scan", jobs_found=jobs_found)
         completed_stages.append("scan")
         log.info("Stage 1 complete — %d new jobs found", jobs_found)
@@ -259,14 +310,42 @@ def run_pipeline() -> int:
         new_jobs = _query_new_jobs(conn)
         researched_list = _query_recent_research(conn)
         cover_letters = _query_cover_letters(conn)
+        apply_now = _query_apply_now(conn)
         warm_leads = _query_warm_leads(conn)
         stats = _build_stats(conn)
+        health_note = _build_health_note(scan_meta, stats)
 
-        sent = send_digest(new_jobs, researched_list, cover_letters, warm_leads, stats)
-        if sent:
-            log.info("Digest email sent successfully")
+        # Only email on slam-dunks: silent runs unless a new job scores >= 90.
+        # Morning digest (7:30 AM) surfaces everything else — no mid-day noise.
+        SLAM_DUNK_THRESHOLD = 90
+        slam_dunks = [j for j in new_jobs if j.get("match_score", 0) >= SLAM_DUNK_THRESHOLD]
+
+        if slam_dunks:
+            log.info("Slam-dunk alert: %d new job(s) score >= %d — sending digest",
+                     len(slam_dunks), SLAM_DUNK_THRESHOLD)
+            sent = send_digest(
+                new_jobs,
+                researched_list,
+                cover_letters,
+                warm_leads,
+                stats,
+                apply_now=apply_now,
+                health_note=health_note,
+            )
+            if sent:
+                log.info("Digest email sent successfully")
+                job_ids = [j["job_id"] for j in new_jobs if j.get("job_id")]
+                if job_ids:
+                    placeholders = ",".join("?" * len(job_ids))
+                    conn.execute(f"UPDATE jobs SET notified = 1 WHERE job_id IN ({placeholders})", job_ids)
+                    conn.commit()
+                    log.info("Marked %d jobs as notified", len(job_ids))
+            else:
+                log.warning("Digest email not sent (credentials missing or SMTP error)")
         else:
-            log.warning("Digest email not sent (credentials missing or SMTP error)")
+            log.info("No slam-dunks (>= %d) in this scan — suppressing digest email. "
+                     "%d new jobs will surface in tomorrow's 7:30 AM morning digest.",
+                     SLAM_DUNK_THRESHOLD, len(new_jobs))
 
         complete_pipeline_run(conn, run_id)
         log.info("=== Pipeline complete — run_id: %s ===", run_id)
@@ -339,7 +418,7 @@ def run_nightly_bundle(dry_run: bool = False, tracker_test_limit: int | None = N
     if tracker_test_limit is not None:
         argv = ["--test", str(tracker_test_limit)]
     log.info("Running fully_automated_job_tracker%s", f" (test={tracker_test_limit})" if tracker_test_limit else "")
-    tracker.main(argv or None)
+    tracker.main(argv)
     return 0
 
 
