@@ -38,14 +38,21 @@ if [[ ! -f "$TOKEN_FILE" ]]; then
   exit 1
 fi
 
-# Helper: read a key from ~/.env, strip quotes, push to GitHub secret
+# Helper: read a key from ~/.env, strip quotes, push to GitHub secret.
+# Wrapped in `|| true` because grep returns 1 when key is absent and we have set -e.
 push_secret() {
   local key="$1"
-  local value
-  value=$(grep "^${key}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | sed 's/^["'\'']//; s/["'\'']$//')
-  if [[ -z "${value:-}" ]]; then
+  local raw
+  raw=$(grep "^${key}=" "$ENV_FILE" 2>/dev/null | head -1 || true)
+  if [[ -z "$raw" ]]; then
     echo "  SKIP   $key (not in ~/.env)"
-    return
+    return 0
+  fi
+  local value
+  value=$(printf '%s' "$raw" | cut -d= -f2- | sed 's/^["'\'']//; s/["'\'']$//')
+  if [[ -z "$value" ]]; then
+    echo "  SKIP   $key (empty value)"
+    return 0
   fi
   echo "  PUSH   $key"
   printf '%s' "$value" | gh secret set "$key" --repo "$REPO" --body -
