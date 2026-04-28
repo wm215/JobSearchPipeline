@@ -46,7 +46,22 @@ def send_via_gmail_api(from_addr: str, to_addr: str, subject: str, html_body: st
 
     try:
         svc = _service()
-        svc.users().messages().send(userId="me", body={"raw": raw}).execute()
+        sent = svc.users().messages().send(userId="me", body={"raw": raw}).execute()
+        msg_id = sent.get("id")
+        # Force INBOX + IMPORTANT immediately using the returned message ID.
+        # Avoids the classifier-vs-rescue race that the search-based rescue had.
+        if msg_id:
+            try:
+                svc.users().messages().modify(
+                    userId="me",
+                    id=msg_id,
+                    body={
+                        "addLabelIds": ["INBOX", "IMPORTANT"],
+                        "removeLabelIds": ["TRASH", "SPAM"],
+                    },
+                ).execute()
+            except Exception as label_exc:
+                print(f"⚠️  gmail_send: could not set INBOX label: {label_exc}")
         return True
     except Exception as exc:
         print(f"❌ gmail_send.send_via_gmail_api failed: {exc}")
