@@ -53,8 +53,14 @@ jobs:
 
       - name: Restore Gmail OAuth token from secret
         run: |
-          mkdir -p ~
-          echo "$GMAIL_TOKEN_B64" | base64 -d > ~/gmail_token.pickle
+          python - <<'PY'
+          import base64, os
+          data = base64.b64decode(os.environ["GMAIL_TOKEN_B64"])
+          path = os.path.expanduser("~/gmail_token.pickle")
+          with open(path, "wb") as f:
+              f.write(data)
+          print(f"Wrote {len(data)} bytes to {path}")
+          PY
         env:
           GMAIL_TOKEN_B64: ${{ secrets.GMAIL_TOKEN_B64 }}
 
