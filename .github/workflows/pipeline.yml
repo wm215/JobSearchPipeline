@@ -93,9 +93,9 @@ jobs:
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           SENDER_EMAIL: ${{ secrets.EMAIL_FROM }}
-          SENDER_PASSWORD: ${{ secrets.EMAIL_PASS }}
+          SENDER_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
         run: |
