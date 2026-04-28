@@ -551,17 +551,25 @@ def send_digest_email(html_content):
         or os.getenv('SENDER_PASSWORD')
     )
 
+    subject = f"📬 Daily Action Digest | {datetime.now().strftime('%b %d')}"
+
+    # Prefer Gmail API (works from cloud runners; SMTP from cloud IPs is often blocked).
+    from gmail_send import send_via_gmail_api
+    if send_via_gmail_api(email_from, email_to, subject, html_content):
+        from inbox_rescue import rescue_to_inbox
+        rescue_to_inbox(subject)
+        return True
+
+    # SMTP fallback (works locally with app password)
     if not email_pass:
         print("❌ No email password found (EMAIL_PASSWORD / EMAIL_PASS / SENDER_PASSWORD)")
         return False
 
     msg = MIMEMultipart('alternative')
-    msg['Subject'] = f"📬 Daily Action Digest | {datetime.now().strftime('%b %d')}"
+    msg['Subject'] = subject
     msg['From'] = email_from
     msg['To'] = email_to
-
-    html_part = MIMEText(html_content, 'html')
-    msg.attach(html_part)
+    msg.attach(MIMEText(html_content, 'html'))
 
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
@@ -572,7 +580,7 @@ def send_digest_email(html_content):
         return False
 
     from inbox_rescue import rescue_to_inbox
-    rescue_to_inbox(msg['Subject'])
+    rescue_to_inbox(subject)
     return True
 
 

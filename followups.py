@@ -119,17 +119,22 @@ def send_followup_email(applications_needing_followup):
     </html>
     """
 
-    # Create message
+    subject = f"📧 {len(applications_needing_followup)} Applications Need Follow-Up"
+
+    # Prefer Gmail API (works from cloud); SMTP from cloud IPs is often blocked.
+    from gmail_send import send_via_gmail_api
+    if send_via_gmail_api(email_from, email_to, subject, html):
+        from inbox_rescue import rescue_to_inbox
+        rescue_to_inbox(subject)
+        return True
+
+    # SMTP fallback (works locally with app password)
     msg = MIMEMultipart('alternative')
-    msg['Subject'] = f"📧 {len(applications_needing_followup)} Applications Need Follow-Up"
+    msg['Subject'] = subject
     msg['From'] = email_from
     msg['To'] = email_to
+    msg.attach(MIMEText(html, 'html'))
 
-    # Attach HTML
-    html_part = MIMEText(html, 'html')
-    msg.attach(html_part)
-
-    # Send email
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(email_from, email_pass)
@@ -139,7 +144,7 @@ def send_followup_email(applications_needing_followup):
         return False
 
     from inbox_rescue import rescue_to_inbox
-    rescue_to_inbox(msg['Subject'])
+    rescue_to_inbox(subject)
     return True
 
 def main():

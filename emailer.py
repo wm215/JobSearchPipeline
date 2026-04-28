@@ -336,6 +336,15 @@ def send_digest(
         log.error("Failed to build digest HTML: %s", exc)
         return False
 
+    # Prefer Gmail API (works from cloud); SMTP from cloud IPs is often blocked.
+    from gmail_send import send_via_gmail_api
+    if send_via_gmail_api(_SENDER, EMAIL_TO, subject, html_body):
+        log.info("Digest email sent to %s via Gmail API", EMAIL_TO)
+        from inbox_rescue import rescue_to_inbox
+        rescue_to_inbox(subject)
+        return True
+
+    # SMTP fallback (works locally with app password)
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = _SENDER
@@ -348,13 +357,13 @@ def send_digest(
             server.starttls()
             server.login(_SENDER, EMAIL_PASS)
             server.sendmail(_SENDER, EMAIL_TO, msg.as_string())
-        log.info("Digest email sent to %s", EMAIL_TO)
+        log.info("Digest email sent to %s via SMTP fallback", EMAIL_TO)
     except Exception as exc:
         log.error("Failed to send digest email: %s", exc)
         return False
 
     from inbox_rescue import rescue_to_inbox
-    rescue_to_inbox(msg['Subject'])
+    rescue_to_inbox(subject)
     return True
 
 
