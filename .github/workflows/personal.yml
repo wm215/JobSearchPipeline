@@ -1,0 +1,86 @@
+name: Personal Automations
+
+on:
+  schedule:
+    # 7:30 AM ET = 11:30 UTC — WHOOP daily sync
+    - cron: "30 11 * * *"
+    # 8:30 AM ET = 12:30 UTC — LinkedIn intelligence briefing
+    - cron: "30 12 * * *"
+  workflow_dispatch:
+    inputs:
+      script:
+        description: "Which to run"
+        required: true
+        default: "linkedin"
+        type: choice
+        options: [linkedin, whoop, both]
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Restore Gmail OAuth token
+        run: |
+          python - <<'PY'
+          import base64, os
+          data = base64.b64decode(os.environ["GMAIL_TOKEN_B64"])
+          with open(os.path.expanduser("~/gmail_token.pickle"), "wb") as f:
+              f.write(data)
+          PY
+        env:
+          GMAIL_TOKEN_B64: ${{ secrets.GMAIL_TOKEN_B64 }}
+
+      - name: Decide what to run
+        id: choose
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "script=${{ github.event.inputs.script }}" >> "$GITHUB_OUTPUT"
+          else
+            HOUR=$(date -u +%H); MIN=$(date -u +%M)
+            if [[ "$HOUR" == "11" && "$MIN" == "30" ]]; then echo "script=whoop" >> "$GITHUB_OUTPUT"
+            elif [[ "$HOUR" == "12" && "$MIN" == "30" ]]; then echo "script=linkedin" >> "$GITHUB_OUTPUT"
+            else echo "script=linkedin" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Run LinkedIn briefing
+        if: steps.choose.outputs.script == 'linkedin' || steps.choose.outputs.script == 'both'
+        env:
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO:   ${{ secrets.EMAIL_TO }}
+        run: |
+          cd "${{ github.workspace }}"
+          PYTHONPATH=. python -c "import sys; sys.path.insert(0,'health'); import linkedin_briefing; linkedin_briefing.send_briefing()"
+
+      - name: Run WHOOP daily
+        if: steps.choose.outputs.script == 'whoop' || steps.choose.outputs.script == 'both'
+        env:
+          WHOOP_CREDENTIALS_B64: ${{ secrets.WHOOP_CREDENTIALS_B64 }}
+          WHOOP_TOKENS_B64:      ${{ secrets.WHOOP_TOKENS_B64 }}
+          SHEETS_TOKEN_B64:      ${{ secrets.SHEETS_TOKEN_B64 }}
+        run: |
+          cd "${{ github.workspace }}"
+          PYTHONPATH=. python health/whoop_daily.py
+
+      - name: Healthcheck ping
+        if: success() && env.HEALTHCHECK_PERSONAL_URL != ''
+        env:
+          HEALTHCHECK_PERSONAL_URL: ${{ secrets.HEALTHCHECK_PERSONAL_URL }}
+        run: curl -fsS --retry 3 -o /dev/null "$HEALTHCHECK_PERSONAL_URL" || echo "ping failed (non-fatal)"
