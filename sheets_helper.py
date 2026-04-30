@@ -19,11 +19,19 @@ def _can_run_interactive_auth():
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 def get_sheets_service():
-    """Get authenticated Google Sheets service"""
+    """Get authenticated Google Sheets service.
+
+    Cloud-friendly: SHEETS_TOKEN_B64 env var is preferred (GitHub secret).
+    Falls back to ~/sheets_token.pickle locally.
+    """
     creds = None
     token_path = os.path.expanduser('~/sheets_token.pickle')
 
-    if os.path.exists(token_path):
+    pickle_b64 = os.environ.get("SHEETS_TOKEN_B64")
+    if pickle_b64:
+        import base64
+        creds = pickle.loads(base64.b64decode(pickle_b64))
+    elif os.path.exists(token_path):
         with open(token_path, 'rb') as token:
             creds = pickle.load(token)
 

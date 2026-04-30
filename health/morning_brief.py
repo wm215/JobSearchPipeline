@@ -47,7 +47,13 @@ def fetch_whoop_recovery() -> dict:
     """Returns {'recovery': int|None, 'hrv': float|None, 'rhr': float|None,
                 'sleep': float|None, 'tone': 'green'|'yellow'|'red'|'unknown'}."""
     try:
-        from health.whoop_daily import fetch_today
+        try:
+            from health.whoop_daily import fetch_today
+        except ImportError:
+            # When run as `python health/morning_brief.py`, the parent dir is
+            # on sys.path but `health/` may not be a package — import directly.
+            sys.path.insert(0, str(Path(__file__).parent))
+            from whoop_daily import fetch_today  # type: ignore
         data = fetch_today()
         rec = data.get("recovery_pct")
         if rec is None:
