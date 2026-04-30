@@ -38,7 +38,9 @@ REVIVAL_SHEET_ID = os.environ.get("WHOOP_REVIVAL_SHEET_ID", "1ZPuIrjfI_d7HU_6gKQ
 REVIVAL_TAB = "Weight Data_Log 2026"
 REVAMP_SHEET_ID = os.environ.get("WHOOP_REVAMP_SHEET_ID", "1TxbgCTrtp1Owuqxpu2Hi7dVkPAUFQsNaaeKQqxWOQh4")
 REVAMP_HISTORY_TAB = "WHOOP"
-REVAMP_DASHBOARD_TAB = "TODAY"
+# NOTE: We do NOT render a TODAY/dashboard tab. The existing "Dashboard" tab
+# in the Revamp sheet already presents WHOOP data via cell formulas pulling
+# from the WHOOP history tab. Adding a 3rd tab would duplicate that.
 
 
 # ── WHOOP token: env var first (cloud), pickle/json file second (local) ─────
@@ -338,10 +340,9 @@ def main() -> int:
         append_revamp_history(svc, today)
     except Exception as exc:
         log.error("Revamp history append failed (non-fatal): %s", exc)
-    try:
-        render_today_dashboard(svc, today, baseline)
-    except Exception as exc:
-        log.error("Dashboard render failed (non-fatal): %s", exc)
+
+    # Existing "Dashboard" tab in the Revamp sheet renders today's data
+    # via cell formulas pulling from the WHOOP history tab — no extra render needed.
 
     log.info("=== WHOOP daily complete ===")
     return 0
