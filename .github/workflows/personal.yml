@@ -2,18 +2,19 @@ name: Personal Automations
 
 on:
   schedule:
-    # 7:30 AM ET = 11:30 UTC — WHOOP daily sync
+    # 7:30 AM ET = 11:30 UTC — fires both jobs in parallel:
+    #   1. WHOOP daily   → updates the WHOOP history tab (feeds Dashboard tab)
+    #   2. Morning brief → unified email (job picks + follow-ups + LinkedIn,
+    #                      tone-modulated by today's WHOOP recovery)
     - cron: "30 11 * * *"
-    # 8:30 AM ET = 12:30 UTC — LinkedIn intelligence briefing
-    - cron: "30 12 * * *"
   workflow_dispatch:
     inputs:
       script:
         description: "Which to run"
         required: true
-        default: "linkedin"
+        default: "morning_brief"
         type: choice
-        options: [linkedin, whoop, both]
+        options: [morning_brief, whoop, linkedin, all]
 
 jobs:
   run:
@@ -24,6 +25,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Restore SQLite job DB from cache (read-only)
+        uses: actions/cache@v4
+        with:
+          path: data/job_pipeline.db
+          key: job-db-readonly-${{ github.run_id }}
+          restore-keys: |
+            job-db-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -53,24 +62,12 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "script=${{ github.event.inputs.script }}" >> "$GITHUB_OUTPUT"
           else
-            HOUR=$(date -u +%H); MIN=$(date -u +%M)
-            if [[ "$HOUR" == "11" && "$MIN" == "30" ]]; then echo "script=whoop" >> "$GITHUB_OUTPUT"
-            elif [[ "$HOUR" == "12" && "$MIN" == "30" ]]; then echo "script=linkedin" >> "$GITHUB_OUTPUT"
-            else echo "script=linkedin" >> "$GITHUB_OUTPUT"
-            fi
+            # Cron fires the full morning bundle: WHOOP write + unified brief
+            echo "script=all" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Run LinkedIn briefing
-        if: steps.choose.outputs.script == 'linkedin' || steps.choose.outputs.script == 'both'
-        env:
-          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          EMAIL_TO:   ${{ secrets.EMAIL_TO }}
-        run: |
-          cd "${{ github.workspace }}"
-          PYTHONPATH=. python -c "import sys; sys.path.insert(0,'health'); import linkedin_briefing; linkedin_briefing.send_briefing()"
-
-      - name: Run WHOOP daily
-        if: steps.choose.outputs.script == 'whoop' || steps.choose.outputs.script == 'both'
+      - name: Run WHOOP daily (writes to sheets)
+        if: steps.choose.outputs.script == 'whoop' || steps.choose.outputs.script == 'all'
         env:
           WHOOP_CREDENTIALS_B64: ${{ secrets.WHOOP_CREDENTIALS_B64 }}
           WHOOP_TOKENS_B64:      ${{ secrets.WHOOP_TOKENS_B64 }}
@@ -78,6 +75,27 @@ jobs:
         run: |
           cd "${{ github.workspace }}"
           PYTHONPATH=. python health/whoop_daily.py
+
+      - name: Run morning brief (unified email)
+        if: steps.choose.outputs.script == 'morning_brief' || steps.choose.outputs.script == 'all'
+        env:
+          EMAIL_FROM:            ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO:              ${{ secrets.EMAIL_TO }}
+          WHOOP_CREDENTIALS_B64: ${{ secrets.WHOOP_CREDENTIALS_B64 }}
+          WHOOP_TOKENS_B64:      ${{ secrets.WHOOP_TOKENS_B64 }}
+          SHEETS_TOKEN_B64:      ${{ secrets.SHEETS_TOKEN_B64 }}
+        run: |
+          cd "${{ github.workspace }}"
+          PYTHONPATH=. python health/morning_brief.py
+
+      - name: Run LinkedIn briefing (legacy standalone — manual only)
+        if: steps.choose.outputs.script == 'linkedin'
+        env:
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO:   ${{ secrets.EMAIL_TO }}
+        run: |
+          cd "${{ github.workspace }}"
+          PYTHONPATH=. python -c "import sys; sys.path.insert(0,'health'); import linkedin_briefing; linkedin_briefing.send_briefing()"
 
       - name: Healthcheck ping
         if: success() && env.HEALTHCHECK_PERSONAL_URL != ''

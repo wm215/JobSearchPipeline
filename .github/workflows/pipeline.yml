@@ -5,12 +5,12 @@ on:
     # Times are UTC. EDT = UTC-4.
     # Pipeline (job scan) — every 2h, 12:00–24:00 UTC = 8 AM – 8 PM EDT
     - cron: "0 12,14,16,18,20,22,0 * * *"
-    # Morning digest — 11:30 UTC = 7:30 AM EDT
-    - cron: "30 11 * * *"
-    # Follow-ups — 12:00 UTC = 8:00 AM EDT
-    - cron: "0 12 * * *"
     # Nightly tracker — 1:00 UTC = 9:00 PM EDT (previous day)
     - cron: "0 1 * * *"
+    # NOTE: morning digest (7:30 AM) and followups (8 AM) are DISABLED here.
+    # Both are now consolidated into the unified morning brief which runs
+    # from .github/workflows/personal.yml at 7:30 AM. Manual dispatch of
+    # 'digest' or 'followups' modes still works for ad-hoc runs.
   workflow_dispatch:
     inputs:
       mode:
@@ -72,14 +72,8 @@ jobs:
             echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
           else
             HOUR=$(date -u +%H)
-            MIN=$(date -u +%M)
-            if [[ "$HOUR" == "11" && "$MIN" == "30" ]]; then
-              echo "mode=digest" >> "$GITHUB_OUTPUT"
-            elif [[ "$HOUR" == "01" ]]; then
+            if [[ "$HOUR" == "01" ]]; then
               echo "mode=nightly" >> "$GITHUB_OUTPUT"
-            elif [[ "$HOUR" == "12" && "$MIN" == "00" ]]; then
-              # 12:00 UTC fires both followups + pipeline; pipeline wins (followups runs same DB anyway)
-              echo "mode=pipeline" >> "$GITHUB_OUTPUT"
             else
               echo "mode=pipeline" >> "$GITHUB_OUTPUT"
             fi
