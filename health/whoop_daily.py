@@ -60,18 +60,32 @@ def _load_whoop_state() -> tuple[dict, dict, Path | None]:
     return creds, tokens, tokens_path
 
 
+# Module-level cache so repeated API calls within one script run don't
+# re-trigger WHOOP's single-use refresh token rotation.
+_TOKEN_CACHE: dict[str, str | float] = {}
+
+
 def _get_whoop_token() -> str:
     """Return a valid WHOOP access token, refreshing if needed.
 
-    Uses the same expiry logic as the original auth.py:
-    obtained_at + expires_in - 60s buffer.
+    WHOOP refresh tokens are single-use: each refresh invalidates the previous
+    refresh_token. Within one script run we cache the access token in memory
+    so a multi-endpoint script (recovery + sleep + baseline) only triggers
+    one refresh at most.
     """
     import time as _time
+
+    # In-memory cache (lasts the lifetime of this Python process)
+    if _TOKEN_CACHE.get("access_token") and _time.time() < _TOKEN_CACHE.get("expires_at", 0) - 60:
+        return _TOKEN_CACHE["access_token"]  # type: ignore[return-value]
+
     creds, tokens, tokens_path = _load_whoop_state()
 
     obtained_at = tokens.get("obtained_at", 0)
     expires_in = tokens.get("expires_in", 3600)
     if _time.time() < obtained_at + expires_in - 60:
+        _TOKEN_CACHE["access_token"] = tokens["access_token"]
+        _TOKEN_CACHE["expires_at"] = obtained_at + expires_in
         return tokens["access_token"]
 
     log.info("Refreshing WHOOP access token")
@@ -91,6 +105,9 @@ def _get_whoop_token() -> str:
     new_tokens["obtained_at"] = _time.time()
     if tokens_path is not None:
         tokens_path.write_text(json.dumps(new_tokens))
+    # Cache so subsequent calls in this run don't trigger a second refresh
+    _TOKEN_CACHE["access_token"] = new_tokens["access_token"]
+    _TOKEN_CACHE["expires_at"] = new_tokens["obtained_at"] + new_tokens.get("expires_in", 3600)
     return new_tokens["access_token"]
 
 
