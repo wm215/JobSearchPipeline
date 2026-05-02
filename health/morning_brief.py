@@ -44,36 +44,56 @@ SHEET_ID = "1tHZtK4qxJOUU7J-1mYbGI05n-azp4md-QDb85zAAAQI"
 
 # ── WHOOP recovery → tone ────────────────────────────────────────────────────
 def fetch_whoop_recovery() -> dict:
-    """Returns {'recovery': int|None, 'hrv': float|None, 'rhr': float|None,
-                'sleep': float|None, 'tone': 'green'|'yellow'|'red'|'unknown'}."""
+    """Read latest WHOOP row from the Revamp sheet's WHOOP tab.
+
+    The sheet gets populated by either the cloud whoop_daily (when its
+    rotated tokens still work) OR by the local whoop-mcp on the laptop.
+    Reading from the sheet means we always have the freshest data either
+    side managed to record, without hitting the WHOOP API ourselves
+    (which suffers from single-use refresh token rotation in cloud).
+
+    Sheet schema (row): [date, sleep_hours, hrv_ms, rhr_bpm, recovery_pct]
+    """
     try:
-        try:
-            from health.whoop_daily import fetch_today
-        except ImportError:
-            # When run as `python health/morning_brief.py`, the parent dir is
-            # on sys.path but `health/` may not be a package — import directly.
-            sys.path.insert(0, str(Path(__file__).parent))
-            from whoop_daily import fetch_today  # type: ignore
-        data = fetch_today()
-        rec = data.get("recovery_pct")
-        if rec is None:
-            tone = "unknown"
-        elif rec >= 67:
-            tone = "green"
-        elif rec >= 34:
-            tone = "yellow"
+        from sheets_helper import get_sheets_service
+        svc = get_sheets_service()
+        REVAMP_SHEET = "1TxbgCTrtp1Owuqxpu2Hi7dVkPAUFQsNaaeKQqxWOQh4"
+        result = svc.spreadsheets().values().get(
+            spreadsheetId=REVAMP_SHEET, range="'WHOOP'!A:E",
+        ).execute()
+        rows = result.get("values", [])
+        if not rows:
+            raise RuntimeError("WHOOP tab is empty")
+        # Latest row (last non-empty)
+        for row in reversed(rows):
+            if row and row[0]:  # has a date
+                latest = row
+                break
         else:
-            tone = "red"
+            raise RuntimeError("No dated rows in WHOOP tab")
+
+        def _f(s):
+            try: return float(s)
+            except (ValueError, TypeError): return None
+
+        sleep_h = _f(latest[1] if len(latest) > 1 else None)
+        hrv     = _f(latest[2] if len(latest) > 2 else None)
+        rhr     = _f(latest[3] if len(latest) > 3 else None)
+        rec     = _f(latest[4] if len(latest) > 4 else None)
+
+        if rec is None:        tone = "unknown"
+        elif rec >= 67:        tone = "green"
+        elif rec >= 34:        tone = "yellow"
+        else:                  tone = "red"
+
         return {
-            "recovery": rec,
-            "hrv": data.get("hrv_ms"),
-            "rhr": data.get("rhr_bpm"),
-            "sleep": data.get("sleep_hours"),
-            "tone": tone,
+            "recovery": rec, "hrv": hrv, "rhr": rhr, "sleep": sleep_h,
+            "tone": tone, "as_of": latest[0],
         }
     except Exception as exc:
-        print(f"⚠️  WHOOP fetch failed: {exc}")
-        return {"recovery": None, "hrv": None, "rhr": None, "sleep": None, "tone": "unknown"}
+        print(f"⚠️  WHOOP sheet fetch failed: {exc}")
+        return {"recovery": None, "hrv": None, "rhr": None, "sleep": None,
+                "tone": "unknown", "as_of": None}
 
 
 def tone_config(tone: str) -> dict:
