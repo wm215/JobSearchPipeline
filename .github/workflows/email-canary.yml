@@ -1,0 +1,47 @@
+name: Email Canary
+
+# Dead-man's-switch: alarms if Personal Automations hasn't had a successful
+# scheduled run in the last 30 hours (i.e. you missed your morning brief).
+# Runs once a day at 14:00 UTC = 10 AM ET, two and a half hours after the
+# morning brief should have fired.
+
+on:
+  schedule:
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      issues: write
+    steps:
+      - name: Check for recent successful brief
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          REPO="${{ github.repository }}"
+          # Most recent successful scheduled (cron) run of Personal Automations
+          LAST_OK=$(gh api "repos/$REPO/actions/runs?per_page=50"             --jq '[.workflow_runs[] | select(.name=="Personal Automations" and .event=="schedule" and .conclusion=="success")][0].created_at // empty')
+
+          if [ -z "$LAST_OK" ]; then
+            echo "::error::No successful scheduled Personal Automations run found in last 50 runs"
+            gh issue create --repo "$REPO"               --title "Morning brief never succeeded — investigate Personal Automations"               --body "Email Canary found no successful scheduled run of Personal Automations in the last 50 attempts. Open the latest run logs and triage."               --label "automation,canary" 2>&1 || true
+            exit 1
+          fi
+
+          LAST_TS=$(python3 -c "from datetime import datetime; print(int(datetime.fromisoformat('$LAST_OK'.replace('Z','+00:00')).timestamp()))")
+          NOW_TS=$(date +%s)
+          AGE_H=$(( (NOW_TS - LAST_TS) / 3600 ))
+
+          echo "Last successful brief: $LAST_OK  (${AGE_H}h ago)"
+
+          if [ "$AGE_H" -gt 30 ]; then
+            echo "::error::Last successful brief was ${AGE_H}h ago — threshold 30h"
+            gh issue create --repo "$REPO"               --title "Morning brief silent for ${AGE_H}h"               --body "Email Canary detected the Personal Automations workflow has not had a successful scheduled run since $LAST_OK (${AGE_H} hours ago). Likely causes: WHOOP token rotation, Sheets token expiry, Gmail token expiry. Run \`python3 ~/whoop_reauth.py\` or \`python3 ~/sheets_reauth_full.py\` as appropriate, then trigger Personal Automations manually."               --label "automation,canary" 2>&1 || true
+            exit 1
+          fi
+
+          echo "OK — brief is fresh."
