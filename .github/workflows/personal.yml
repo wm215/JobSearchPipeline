@@ -2,10 +2,10 @@ name: Personal Automations
 
 on:
   schedule:
-    # 7:30 AM ET = 11:30 UTC — fires both jobs in parallel:
-    #   1. WHOOP daily   → updates the WHOOP history tab (feeds Dashboard tab)
-    #   2. Morning brief → unified email (job picks + follow-ups + LinkedIn,
-    #                      tone-modulated by today's WHOOP recovery)
+    # 7:30 AM ET = 11:30 UTC — sends the morning brief.
+    # WHOOP write was removed 2026-05-05: dual-runner token rotation kept
+    # killing the cron. Morning brief reads WHOOP from the sheet (populated
+    # by the local whoop-mcp on the laptop) and degrades gracefully if empty.
     - cron: "30 11 * * *"
   workflow_dispatch:
     inputs:
@@ -14,7 +14,7 @@ on:
         required: true
         default: "morning_brief"
         type: choice
-        options: [morning_brief, whoop, linkedin, all]
+        options: [morning_brief, linkedin, all]
 
 jobs:
   run:
@@ -62,29 +62,15 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "script=${{ github.event.inputs.script }}" >> "$GITHUB_OUTPUT"
           else
-            # Cron fires the full morning bundle: WHOOP write + unified brief
-            echo "script=all" >> "$GITHUB_OUTPUT"
+            echo "script=morning_brief" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Run WHOOP daily (writes to sheets)
-        if: steps.choose.outputs.script == 'whoop' || steps.choose.outputs.script == 'all'
-        continue-on-error: true   # WHOOP refresh-token rotation must not block the morning brief
-        env:
-          WHOOP_CREDENTIALS_B64: ${{ secrets.WHOOP_CREDENTIALS_B64 }}
-          WHOOP_TOKENS_B64:      ${{ secrets.WHOOP_TOKENS_B64 }}
-          SHEETS_TOKEN_B64:      ${{ secrets.SHEETS_TOKEN_B64 }}
-        run: |
-          cd "${{ github.workspace }}"
-          PYTHONPATH=. python health/whoop_daily.py
 
       - name: Run morning brief (unified email)
         if: steps.choose.outputs.script == 'morning_brief' || steps.choose.outputs.script == 'all'
         env:
-          EMAIL_FROM:            ${{ secrets.EMAIL_FROM }}
-          EMAIL_TO:              ${{ secrets.EMAIL_TO }}
-          WHOOP_CREDENTIALS_B64: ${{ secrets.WHOOP_CREDENTIALS_B64 }}
-          WHOOP_TOKENS_B64:      ${{ secrets.WHOOP_TOKENS_B64 }}
-          SHEETS_TOKEN_B64:      ${{ secrets.SHEETS_TOKEN_B64 }}
+          EMAIL_FROM:       ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO:         ${{ secrets.EMAIL_TO }}
+          SHEETS_TOKEN_B64: ${{ secrets.SHEETS_TOKEN_B64 }}
         run: |
           cd "${{ github.workspace }}"
           PYTHONPATH=. python health/morning_brief.py
