@@ -68,6 +68,7 @@ jobs:
 
       - name: Run WHOOP daily (writes to sheets)
         if: steps.choose.outputs.script == 'whoop' || steps.choose.outputs.script == 'all'
+        continue-on-error: true   # WHOOP refresh-token rotation must not block the morning brief
         env:
           WHOOP_CREDENTIALS_B64: ${{ secrets.WHOOP_CREDENTIALS_B64 }}
           WHOOP_TOKENS_B64:      ${{ secrets.WHOOP_TOKENS_B64 }}
