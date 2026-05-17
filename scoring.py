@@ -136,6 +136,12 @@ _DOMAIN_TIER2_KEYWORDS: list[str] = [
     "burlington county",
     "gloucester county",
     "mercer county",
+    # State of Illinois + county health (added 2026-05-16)
+    "ihda",
+    "illinois housing development authority",
+    "cook county health",
+    "cchhs",
+    "countycare",
 ]
 
 _DOMAIN_TIER3_KEYWORDS: list[str] = [
@@ -167,6 +173,12 @@ _DOMAIN_TIER3_KEYWORDS: list[str] = [
     "federal contract",
     "government contract",
     "acquisition",
+    # Federal research / consulting firms (added 2026-05-16)
+    "abt associates",
+    "mathematica",
+    "rand corporation",
+    "icf international",
+    "tetra tech",
 ]
 
 # ---------------------------------------------------------------------------

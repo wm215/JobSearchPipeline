@@ -290,11 +290,16 @@ DISQUALIFY_PHRASES: list[str] = [
     "interior designer",
     "landscape architect",
     "urban designer",
-    # Clinical / Caregiver
+    # Clinical / Caregiver — direct-service titles only.
+    # Broader terms like "behavioral health" or "child welfare" left out
+    # so government program-management roles in those areas still qualify.
     "social worker",
-    "case manager",  # often a clinical/social-services role
-    "child welfare",
-    "behavioral health",
+    "case manager",
+    "child welfare worker",
+    "child welfare caseworker",
+    "behavioral health counselor",
+    "behavioral health technician",
+    "behavioral health aide",
     "substance abuse counselor",
     "therapist",
     # Manufacturing / Production

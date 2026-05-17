@@ -24,11 +24,27 @@ jobs:
           set -e
           REPO="${{ github.repository }}"
           # Most recent successful scheduled (cron) run of Personal Automations
-          LAST_OK=$(gh api "repos/$REPO/actions/runs?per_page=50"             --jq '[.workflow_runs[] | select(.name=="Personal Automations" and .event=="schedule" and .conclusion=="success")][0].created_at // empty')
+          LAST_OK=$(gh api "repos/$REPO/actions/runs?per_page=50" \
+            --jq '[.workflow_runs[] | select(.name=="Personal Automations" and .event=="schedule" and .conclusion=="success")][0].created_at // empty')
 
           if [ -z "$LAST_OK" ]; then
             echo "::error::No successful scheduled Personal Automations run found in last 50 runs"
-            gh issue create --repo "$REPO"               --title "Morning brief never succeeded — investigate Personal Automations"               --body "Email Canary found no successful scheduled run of Personal Automations in the last 50 attempts. Open the latest run logs and triage."               --label "automation,canary" 2>&1 || true
+            gh issue create --repo "$REPO" \
+              --title "🚨 Your morning health email has NEVER worked — setup issue" \
+              --body "**What's broken (in plain English):** Your daily 7:30 AM morning email — the one with your WHOOP recovery score and LinkedIn brief — has never successfully run on schedule in the last 50 attempts. Either it was just deployed, or it's been silently broken since day one.
+
+          **What to do right now:**
+
+          1. Click here → https://github.com/wm215/JobSearchPipeline/actions/workflows/personal.yml
+          2. Click the most recent red ❌ run and read the error at the top
+          3. Match the error to a fix:
+             - Missing GitHub Secret → add \`WHOOP_TOKENS_B64\` / \`SHEETS_TOKEN_B64\` under repo Settings → Secrets → Actions
+             - WHOOP token expired → run \`python3 ~/whoop_reauth.py\` in Terminal
+             - Google Sheets token expired → run \`python3 ~/sheets_reauth_full.py\` in Terminal
+          4. Hit 'Run workflow' to retry
+
+          _Auto-opened by the Email Canary safety check. Close this issue once your morning email is working again._" \
+              --label "automation,canary" 2>&1 || true
             exit 1
           fi
 
@@ -40,7 +56,23 @@ jobs:
 
           if [ "$AGE_H" -gt 30 ]; then
             echo "::error::Last successful brief was ${AGE_H}h ago — threshold 30h"
-            gh issue create --repo "$REPO"               --title "Morning brief silent for ${AGE_H}h"               --body "Email Canary detected the Personal Automations workflow has not had a successful scheduled run since $LAST_OK (${AGE_H} hours ago). Likely causes: WHOOP token rotation, Sheets token expiry, Gmail token expiry. Run \`python3 ~/whoop_reauth.py\` or \`python3 ~/sheets_reauth_full.py\` as appropriate, then trigger Personal Automations manually."               --label "automation,canary" 2>&1 || true
+            gh issue create --repo "$REPO" \
+              --title "🚨 Your morning health email hasn't arrived in ${AGE_H} hours — something's broken" \
+              --body "**What's broken (in plain English):** You normally get an email every morning at 7:30 AM ET with your WHOOP recovery score and LinkedIn brief. It hasn't arrived in **${AGE_H} hours**. Last one that worked: \`$LAST_OK\` (UTC).
+
+          **What to do right now:**
+
+          1. Click here → https://github.com/wm215/JobSearchPipeline/actions/workflows/personal.yml
+          2. Click the most recent red ❌ run and read the error message at the top of the page
+          3. Match the error to its fix:
+             - **\"billing\"** or **\"spending limit\"** or **\"payments have failed\"** → Either make the repo public at Settings → General → Danger Zone, OR fix billing at https://github.com/settings/billing
+             - **WHOOP** / **401** / **unauthorized** → run \`python3 ~/whoop_reauth.py\` in Terminal
+             - **Sheets** / **Google API** / **invalid_grant** → run \`python3 ~/sheets_reauth_full.py\` in Terminal
+             - **Gmail** / **SMTPAuthenticationError** → run \`python3 ~/gmail_reauth.py\` in Terminal
+          4. Hit 'Run workflow' on that same page to retry
+
+          _Auto-opened by the Email Canary safety check. Close this issue once your morning email is back._" \
+              --label "automation,canary" 2>&1 || true
             exit 1
           fi
 
