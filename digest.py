@@ -437,9 +437,13 @@ def generate_digest_html(starred, jobs_hot, jobs_active_unread, followups_due, t
 
 
 def get_top_jobs_today(n: int = 3) -> list[dict]:
-    """Return the top N unnotified TOP_MATCH jobs from the pipeline DB."""
+    """Return the top N unnotified TOP_MATCH jobs from the pipeline DB,
+    restricted to William's target locations using the same filter the
+    pipeline scan uses (single source of truth in run.py).
+    """
     import sqlite3
     from pathlib import Path
+    from run import _target_location_sql
     db_path = Path(__file__).parent / "data" / "job_pipeline.db"
     if not db_path.exists():
         return []
@@ -447,10 +451,11 @@ def get_top_jobs_today(n: int = 3) -> list[dict]:
         conn = sqlite3.connect(str(db_path))
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            """
+            f"""
             SELECT job_id, title, company, location, match_score, url, source
             FROM jobs
             WHERE match_score >= 75 AND notified = 0 AND applied = 0
+              AND {_target_location_sql()}
             ORDER BY match_score DESC, found_date DESC
             LIMIT ?
             """,
