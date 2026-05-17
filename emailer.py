@@ -108,30 +108,30 @@ def build_digest_html(
             )
             rows_html += (
                 f"<tr>"
-                f'<td style="padding:8px 12px;text-align:center;">'
+                f'<td style="padding:8px 6px;text-align:center;word-wrap:break-word;word-break:normal;overflow-wrap:break-word;">'
                 f'<span style="font-size:20px;font-weight:bold;color:{color};">{int(score)}</span>'
                 f"</td>"
-                f'<td style="padding:8px 12px;">'
+                f'<td style="padding:8px 6px;word-wrap:break-word;word-break:normal;overflow-wrap:break-word;">'
                 f'<a href="{url}" style="color:#1565c0;font-weight:bold;text-decoration:none;">{title}</a>'
                 f"{warm_badge}"
                 f"</td>"
-                f'<td style="padding:8px 12px;color:#444;">{company}</td>'
-                f'<td style="padding:8px 12px;color:#666;">{location}</td>'
-                f'<td style="padding:8px 12px;color:#888;font-size:12px;">{source}</td>'
+                f'<td style="padding:8px 6px;color:#444;word-wrap:break-word;word-break:normal;overflow-wrap:break-word;">{company}</td>'
+                f'<td style="padding:8px 6px;color:#666;word-wrap:break-word;word-break:normal;overflow-wrap:break-word;">{location}</td>'
+                f'<td class="src-col" style="padding:8px 6px;color:#888;font-size:12px;word-wrap:break-word;">{source}</td>'
                 f"</tr>"
             )
         matches_section = f"""
         <h2 style="color:#1565c0;border-bottom:2px solid #1565c0;padding-bottom:6px;">
             Top Matches ({len(new_jobs)})
         </h2>
-        <table style="width:100%;border-collapse:collapse;">
+        <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
             <thead>
                 <tr style="background:#f5f5f5;">
-                    <th style="padding:8px 12px;text-align:center;color:#666;font-size:12px;">SCORE</th>
-                    <th style="padding:8px 12px;text-align:left;color:#666;font-size:12px;">TITLE</th>
-                    <th style="padding:8px 12px;text-align:left;color:#666;font-size:12px;">COMPANY</th>
-                    <th style="padding:8px 12px;text-align:left;color:#666;font-size:12px;">LOCATION</th>
-                    <th style="padding:8px 12px;text-align:left;color:#666;font-size:12px;">SOURCE</th>
+                    <th style="width:13%;padding:8px 6px;text-align:center;color:#666;font-size:12px;">SCORE</th>
+                    <th style="width:40%;padding:8px 6px;text-align:left;color:#666;font-size:12px;">TITLE</th>
+                    <th style="width:22%;padding:8px 6px;text-align:left;color:#666;font-size:12px;">COMPANY</th>
+                    <th style="width:17%;padding:8px 6px;text-align:left;color:#666;font-size:12px;">LOCATION</th>
+                    <th class="src-col" style="width:8%;padding:8px 6px;text-align:left;color:#666;font-size:12px;">SOURCE</th>
                 </tr>
             </thead>
             <tbody>
@@ -153,23 +153,23 @@ def build_digest_html(
             score = int(job.get("match_score", 0))
             queue_rows += (
                 "<tr>"
-                f'<td style="padding:8px 12px;text-align:center;font-weight:bold;color:{_score_color(score)};">{score}</td>'
-                f'<td style="padding:8px 12px;"><a href="{job.get("url", "#")}" style="color:#1565c0;text-decoration:none;font-weight:bold;">{job.get("title", "")}</a></td>'
-                f'<td style="padding:8px 12px;color:#444;">{job.get("company", "")}</td>'
-                f'<td style="padding:8px 12px;color:#666;">{job.get("location", "")}</td>'
+                f'<td style="padding:8px 6px;text-align:center;font-weight:bold;color:{_score_color(score)};word-wrap:break-word;word-break:normal;overflow-wrap:break-word;">{score}</td>'
+                f'<td style="padding:8px 6px;word-wrap:break-word;word-break:normal;overflow-wrap:break-word;"><a href="{job.get("url", "#")}" style="color:#1565c0;text-decoration:none;font-weight:bold;">{job.get("title", "")}</a></td>'
+                f'<td style="padding:8px 6px;color:#444;word-wrap:break-word;word-break:normal;overflow-wrap:break-word;">{job.get("company", "")}</td>'
+                f'<td style="padding:8px 6px;color:#666;word-wrap:break-word;word-break:normal;overflow-wrap:break-word;">{job.get("location", "")}</td>'
                 "</tr>"
             )
         apply_section = f"""
         <h2 style="color:#2e7d32;border-bottom:2px solid #2e7d32;padding-bottom:6px;">
             Apply Now Queue ({len(apply_now)})
         </h2>
-        <table style="width:100%;border-collapse:collapse;">
+        <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
             <thead>
                 <tr style="background:#f5f5f5;">
-                    <th style="padding:8px 12px;text-align:center;color:#666;font-size:12px;">SCORE</th>
-                    <th style="padding:8px 12px;text-align:left;color:#666;font-size:12px;">TITLE</th>
-                    <th style="padding:8px 12px;text-align:left;color:#666;font-size:12px;">COMPANY</th>
-                    <th style="padding:8px 12px;text-align:left;color:#666;font-size:12px;">LOCATION</th>
+                    <th style="width:14%;padding:8px 6px;text-align:center;color:#666;font-size:12px;">SCORE</th>
+                    <th style="width:44%;padding:8px 6px;text-align:left;color:#666;font-size:12px;">TITLE</th>
+                    <th style="width:24%;padding:8px 6px;text-align:left;color:#666;font-size:12px;">COMPANY</th>
+                    <th style="width:18%;padding:8px 6px;text-align:left;color:#666;font-size:12px;">LOCATION</th>
                 </tr>
             </thead>
             <tbody>
@@ -254,6 +254,7 @@ def build_digest_html(
     html = f"""<html>
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
   body {{ font-family: Arial, sans-serif; background: #f9f9f9; color: #222; margin: 0; padding: 0; }}
   .container {{ max-width: 900px; margin: 0 auto; background: #fff; padding: 0 0 40px; }}
@@ -264,6 +265,16 @@ def build_digest_html(
   a {{ color: #1565c0; }}
   pre {{ background: #f9f9f9; }}
   .footer {{ padding: 16px 32px; color: #999; font-size: 11px; border-top: 1px solid #eee; }}
+  /* Mobile: hide low-value SOURCE column so TITLE/COMPANY/LOCATION get more room */
+  @media (max-width: 600px) {{
+    .src-col {{ display: none !important; }}
+    .container {{ max-width: 100% !important; }}
+    .header {{ padding: 16px 14px !important; }}
+    .content {{ padding: 14px !important; }}
+    .footer {{ padding: 12px 14px !important; }}
+    table {{ font-size: 13px; }}
+    th, td {{ padding: 6px 4px !important; }}
+  }}
 </style>
 </head>
 <body>
