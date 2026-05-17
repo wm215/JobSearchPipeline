@@ -44,7 +44,7 @@ jobs:
           4. Hit 'Run workflow' to retry
 
           _Auto-opened by the Email Canary safety check. Close this issue once your morning email is working again._" \
-              --label "automation,canary" 2>&1 || true
+              2>&1 || true
             exit 1
           fi
 
@@ -72,7 +72,7 @@ jobs:
           4. Hit 'Run workflow' on that same page to retry
 
           _Auto-opened by the Email Canary safety check. Close this issue once your morning email is back._" \
-              --label "automation,canary" 2>&1 || true
+              2>&1 || true
             exit 1
           fi
 
