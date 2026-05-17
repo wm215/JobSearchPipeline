@@ -15,8 +15,17 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest requests python-dotenv pandas beautifulsoup4
+          pip install pytest requests python-dotenv pandas beautifulsoup4 \
+            google-auth google-auth-oauthlib google-auth-httplib2 \
+            google-api-python-client
       - name: Run tests
+        env:
+          # Dummy values so tests that check for these env vars do not
+          # short-circuit. Actual API calls inside the tests are mocked.
+          USAJOBS_API_KEY: ci-dummy-key
+          EMAIL_USER: ci@example.com
+          EMAIL_PASS: ci-dummy-pass
+          EMAIL_TO: ci@example.com
         run: |
           pytest -q \
             tests/test_db.py \
