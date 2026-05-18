@@ -257,6 +257,8 @@ def test_send_digest_returns_true_on_success():
     with mock.patch("emailer._SENDER", "from@test.com"), \
          mock.patch("emailer.EMAIL_PASS", "secret"), \
          mock.patch("emailer.EMAIL_TO", "to@test.com"), \
+         mock.patch("gmail_send.send_via_gmail_api", return_value=False), \
+         mock.patch("inbox_rescue.rescue_to_inbox"), \
          mock.patch("smtplib.SMTP") as mock_smtp:
         mock_smtp.return_value.__enter__ = lambda s: mock_smtp_instance
         mock_smtp.return_value.__exit__ = mock.MagicMock(return_value=False)
@@ -270,6 +272,7 @@ def test_send_digest_returns_false_on_smtp_error():
     with mock.patch("emailer._SENDER", "from@test.com"), \
          mock.patch("emailer.EMAIL_PASS", "secret"), \
          mock.patch("emailer.EMAIL_TO", "to@test.com"), \
+         mock.patch("gmail_send.send_via_gmail_api", return_value=False), \
          mock.patch("smtplib.SMTP", side_effect=ConnectionRefusedError("refused")):
         result = send_digest([SAMPLE_JOB], [], [], [], SAMPLE_STATS)
 
