@@ -12,3 +12,22 @@ __pycache__/
 .pytest_cache/
 .venv/
 data/pha_careers_snapshot.txt
+
+# Local-only Mac infrastructure — not used by cloud pipeline
+automation_schedule.py
+scripts/automation_health_check.py
+scripts/dedupe_managed_processes.py
+scripts/manage_launch_agents.py
+scripts/next_apply_batch.py
+
+# Local /apply skill internals — contains real PII fixtures, runs on local Mac only
+apply_helpers/
+tests/test_label_matcher.py
+
+# Personal data and home-base notes
+applications-archive/
+SYSTEM_MAP.md
+
+# Stale backups
+cleanup_backup_*.zip
+crontab_backup_*.txt
