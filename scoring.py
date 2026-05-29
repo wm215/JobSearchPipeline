@@ -398,6 +398,17 @@ def score_job(
     raw_total = domain + role + skills + salary + loc
 
     # -----------------------------------------------------------------------
+    # NEW Step 7.5: Location hard gate (added 2026-05-29)
+    # If loc == 0 (not in target regions or unknown), disqualify.
+    # Prevents Alexandria VA / Baltimore MD / Chicago / unknown jobs from
+    # scoring 90+ on domain+skills alone.
+    # -----------------------------------------------------------------------
+    if loc == 0:
+        return _disqualified(
+            f"Location not in target regions: {location or 'unknown'}"
+        )
+
+    # -----------------------------------------------------------------------
     # Step 8: Domain gate
     # -----------------------------------------------------------------------
     reason: str | None = None
@@ -557,11 +568,10 @@ def _score_location(location_lower: str, salary_min: int | None = None) -> int:
         return 10
     if "delaware" in location_lower or ", de" in location_lower:
         return 10
-    # DC is "slam-dunk only" — low default; full points only for GS-14+ salaries.
+    # DC disqualified 2026-05-29 (Will relocated to Philly, no DC commute).
+    # To restore: set return values back to 10 (slam-dunk) and 3 (default).
     if "washington" in location_lower and ("dc" in location_lower or "d.c." in location_lower):
-        if salary_min is not None and salary_min >= _DC_SLAM_DUNK_SALARY_MIN:
-            return 10
-        return 3
+        return 0
     # NJ: distinguish Philly-adjacent from distant commuter towns
     if "new jersey" in location_lower or ", nj" in location_lower:
         if any(city in location_lower for city in _PHILLY_ADJACENT_NJ):
@@ -569,12 +579,13 @@ def _score_location(location_lower: str, salary_min: int | None = None) -> int:
         if any(city in location_lower for city in _DISTANT_NJ_SUBURBS):
             return 3
         return 5  # Other NJ — modest credit
+    # Chicago removed 2026-05-29 (Will relocated to Philly); was return 9
     if "chicago" in location_lower:
-        return 9
+        return 0
     # Remote counts as second-tier with Chicago — hybrid-Philly, hybrid-Chicago,
     # or fully-remote are all acceptable to William.
     if "remote" in location_lower:
-        return 9
+        return 10  # bumped 2026-05-29 so remote roles can hit TOP_MATCH
     if "telework" in location_lower:
         return 9
     if "multiple locations" in location_lower:

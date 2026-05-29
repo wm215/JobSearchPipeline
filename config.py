@@ -56,12 +56,12 @@ TARGET_REGIONS: list[str] = [
     "Philadelphia PA",
     "New Jersey",
     "Delaware",
-    "Chicago IL",
+    # Chicago removed 2026-05-29 (Will relocated to Philly)
 ]
 
 # DC is enabled by default but gated by salary/score at the scoring layer —
 # only "slam-dunk" DC jobs ($130k+ salary + strong role/domain fit) make TOP_MATCH.
-INCLUDE_WASHINGTON_DC: bool = os.getenv("INCLUDE_WASHINGTON_DC", "1") == "1"
+INCLUDE_WASHINGTON_DC: bool = os.getenv("INCLUDE_WASHINGTON_DC", "0") == "1"  # default off 2026-05-29 (Will moved to Philly)
 
 # Candidate scoring + apply queue thresholds.
 APPLY_NOW_THRESHOLD: int = int(os.getenv("APPLY_NOW_THRESHOLD", "75"))

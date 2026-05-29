@@ -115,10 +115,28 @@ def fetch_top_jobs(min_score: int, limit: int) -> list[dict]:
         return []
     conn = sqlite3.connect(JOB_DB)
     conn.row_factory = sqlite3.Row
+    # Location filter added 2026-05-29 (Will relocated to Philly).
+    # Only surface jobs in Philly, PA, NJ, DE, or fully-remote.
+    # Excludes Chicago, DC, VA, MD, etc.
     rows = conn.execute(
         """SELECT match_score, title, company, location, url, source
            FROM jobs
            WHERE match_score >= ? AND notified = 0 AND applied = 0
+             AND (
+                lower(location) LIKE '%philadelphia%'
+             OR lower(location) LIKE '%philly%'
+             OR lower(location) LIKE '%, pa%'
+             OR lower(location) LIKE '%pa,%'
+             OR lower(location) LIKE '%pa %'
+             OR lower(location) LIKE '%new jersey%'
+             OR lower(location) LIKE '%, nj%'
+             OR lower(location) LIKE '%delaware%'
+             OR lower(location) LIKE '%, de%'
+             OR lower(location) LIKE '%remote%'
+             OR lower(location) LIKE '%telework%'
+             OR lower(location) LIKE '%multiple locations%'
+             OR lower(location) LIKE '%location negotiable%'
+             )
            ORDER BY match_score DESC, created_at DESC
            LIMIT ?""",
         (min_score, limit),

@@ -79,7 +79,8 @@ def _target_location_sql() -> str:
         OR lower(location) LIKE '%delaware%'
         OR lower(location) LIKE '%, de%'
         {dc_clause}
-        OR lower(location) LIKE '%chicago%'
+        # Chicago dropped 2026-05-29 (Will relocated to Philly)
+        # OR lower(location) LIKE '%chicago%'
         OR lower(location) LIKE '%remote%'
         OR lower(location) LIKE '%telework%'
         OR lower(location) LIKE '%multiple locations%'
