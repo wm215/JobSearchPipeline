@@ -119,30 +119,60 @@ def fetch_top_jobs(min_score: int, limit: int) -> list[dict]:
     # Only surface jobs in Philly, PA, NJ, DE, or fully-remote.
     # Excludes Chicago, DC, VA, MD, etc.
     rows = conn.execute(
-        """SELECT match_score, title, company, location, url, source
-           FROM jobs
-           WHERE match_score >= ? AND notified = 0 AND applied = 0
+        """SELECT j.match_score, j.job_id, j.title, j.company, j.location, j.url, j.source,
+                  a.cover_letter
+           FROM jobs j
+           LEFT JOIN job_applications a ON j.job_id = a.job_id
+           WHERE j.match_score >= ? AND j.notified = 0 AND j.applied = 0
              AND (
-                lower(location) LIKE '%philadelphia%'
-             OR lower(location) LIKE '%philly%'
-             OR lower(location) LIKE '%, pa%'
-             OR lower(location) LIKE '%pa,%'
-             OR lower(location) LIKE '%pa %'
-             OR lower(location) LIKE '%new jersey%'
-             OR lower(location) LIKE '%, nj%'
-             OR lower(location) LIKE '%delaware%'
-             OR lower(location) LIKE '%, de%'
-             OR lower(location) LIKE '%remote%'
-             OR lower(location) LIKE '%telework%'
-             OR lower(location) LIKE '%multiple locations%'
-             OR lower(location) LIKE '%location negotiable%'
+                lower(j.location) LIKE '%philadelphia%'
+             OR lower(j.location) LIKE '%philly%'
+             OR lower(j.location) LIKE '%, pa%'
+             OR lower(j.location) LIKE '%pa,%'
+             OR lower(j.location) LIKE '%pa %'
+             OR lower(j.location) LIKE '%new jersey%'
+             OR lower(j.location) LIKE '%, nj%'
+             OR lower(j.location) LIKE '%delaware%'
+             OR lower(j.location) LIKE '%, de%'
+             OR lower(j.location) LIKE '%remote%'
+             OR lower(j.location) LIKE '%telework%'
+             OR lower(j.location) LIKE '%multiple locations%'
+             OR lower(j.location) LIKE '%location negotiable%'
              )
-           ORDER BY match_score DESC, created_at DESC
+           ORDER BY j.match_score DESC, j.created_at DESC
            LIMIT ?""",
         (min_score, limit),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def fetch_warm_leads_for_jobs(job_ids: list[str]) -> dict[str, list[dict]]:
+    """Return {job_id: [{name, title, company, linkedin_url, message}, ...]} for the given jobs.
+    Pulls from warm_leads table (populated by networker.py). Caps at 3 per job.
+    """
+    if not job_ids or not Path(JOB_DB).exists():
+        return {}
+    conn = sqlite3.connect(JOB_DB)
+    conn.row_factory = sqlite3.Row
+    placeholders = ",".join("?" for _ in job_ids)
+    rows = conn.execute(
+        f"""SELECT job_id, name, title, company, linkedin_url, notes
+            FROM warm_leads
+            WHERE job_id IN ({placeholders})
+            ORDER BY job_id, id""",
+        list(job_ids),
+    ).fetchall()
+    conn.close()
+    out: dict[str, list[dict]] = {}
+    for r in rows:
+        out.setdefault(r["job_id"], []).append({
+            "name": r["name"], "title": r["title"], "company": r["company"],
+            "linkedin_url": r["linkedin_url"] or "",
+            "message": r["notes"] or "",
+        })
+    # cap at 3
+    return {jid: leads[:3] for jid, leads in out.items()}
 
 
 # ── Follow-ups ───────────────────────────────────────────────────────────────
@@ -211,26 +241,48 @@ def fetch_linkedin_nudge() -> dict:
 
 
 # ── Render ───────────────────────────────────────────────────────────────────
-def render_html(whoop: dict, jobs: list, followups: dict, linkedin: dict, tcfg: dict) -> str:
+def render_html(whoop: dict, jobs: list, followups: dict, linkedin: dict, tcfg: dict, warm_leads_by_job: dict | None = None) -> str:
     today = datetime.now().strftime("%A, %B %-d, %Y")
     rec_str = f"{whoop['recovery']}%" if whoop['recovery'] is not None else "—"
     hrv_str = f"{whoop['hrv']} ms" if whoop['hrv'] else "—"
     rhr_str = f"{whoop['rhr']} bpm" if whoop['rhr'] else "—"
     sleep_str = f"{whoop['sleep']} h" if whoop['sleep'] else "—"
 
+    warm_leads_by_job = warm_leads_by_job or {}
     job_rows = ""
     if jobs:
         for j in jobs:
             score_color = "#34c759" if j['match_score'] >= 90 else ("#0071e3" if j['match_score'] >= 80 else "#5e5ce6")
             url = j.get('url') or '#'
+            cl_snippet = (j.get('cover_letter') or '').strip()
+            cl_snippet = cl_snippet[:280] + ("..." if len(cl_snippet) > 280 else "")
+            cl_badge = '<span style="background:#e3f2fd;color:#0071e3;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;margin-left:6px;">📝 Cover letter drafted</span>' if cl_snippet else ''
+
+            warm = warm_leads_by_job.get(j.get('job_id') or '', [])
+            warm_badge = f'<span style="background:#fff3e0;color:#7a4100;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;margin-left:6px;">🔗 {len(warm)} warm lead{"s" if len(warm) != 1 else ""}</span>' if warm else ''
+
+            cl_block = f"""<div style="background:#f5f9ff;border-left:3px solid #0071e3;padding:10px 12px;margin-top:8px;border-radius:6px;font-size:12px;color:#1d1d1f;font-style:italic;line-height:1.5;">{cl_snippet}</div>""" if cl_snippet else ""
+
+            warm_block = ""
+            if warm:
+                for w in warm:
+                    name = w.get("name") or "Unknown"
+                    title = w.get("title") or ""
+                    msg = (w.get("message") or "").strip()[:240]
+                    li_url = w.get("linkedin_url") or ""
+                    name_html = f'<a href="{li_url}" style="color:#1d1d1f;text-decoration:none;font-weight:600;">{name}</a>' if li_url else f'<strong>{name}</strong>'
+                    warm_block += f"""<div style="background:#fffaf0;border-left:3px solid #ff9500;padding:10px 12px;margin-top:6px;border-radius:6px;font-size:12px;color:#1d1d1f;line-height:1.5;"><div style="font-weight:600;margin-bottom:4px;">{name_html} <span style="color:#86868b;font-weight:400;">· {title}</span></div><div>{msg}</div></div>"""
+
             job_rows += f"""
             <tr>
-              <td style="padding:10px 12px;border-bottom:1px solid #e5e5ea;">
+              <td style="padding:10px 12px;border-bottom:1px solid #e5e5ea;vertical-align:top;">
                 <span style="display:inline-block;min-width:38px;padding:3px 8px;background:{score_color};color:white;border-radius:6px;font-weight:600;font-size:13px;text-align:center;">{int(j['match_score'])}</span>
               </td>
               <td style="padding:10px 12px;border-bottom:1px solid #e5e5ea;">
-                <a href="{url}" style="color:#1d1d1f;text-decoration:none;font-weight:500;">{j['title']}</a>
-                <div style="color:#86868b;font-size:12px;">{j['company']} · {j.get('location','')[:30]} · <span style="color:#aeaeb2;">{j.get('source','')}</span></div>
+                <a href="{url}" style="color:#1d1d1f;text-decoration:none;font-weight:500;">{j['title']}</a>{cl_badge}{warm_badge}
+                <div style="color:#86868b;font-size:12px;margin-top:2px;">{j['company']} · {j.get('location','')[:30]} · <span style="color:#aeaeb2;">{j.get('source','')}</span></div>
+                {cl_block}
+                {warm_block}
               </td>
             </tr>"""
     else:
@@ -261,15 +313,11 @@ def render_html(whoop: dict, jobs: list, followups: dict, linkedin: dict, tcfg: 
     else:
         li_section = "<p style='color:#86868b;margin:0;'>LinkedIn data unavailable.</p>"
 
-    return f"""<!doctype html>
-<html><head><meta charset="utf-8"></head>
-<body style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;margin:0;padding:20px;background:#f5f5f7;color:#1d1d1f;">
-<div style="max-width:640px;margin:0 auto;background:white;border-radius:14px;padding:32px;box-shadow:0 2px 14px rgba(0,0,0,0.06);">
-
-  <div style="margin-bottom:8px;color:#86868b;font-size:13px;letter-spacing:0.5px;text-transform:uppercase;">Morning Brief</div>
-  <h1 style="margin:0 0 24px 0;font-size:26px;font-weight:600;letter-spacing:-0.5px;">{today}</h1>
-
-  <!-- WHOOP TONE BAR -->
+    # WHOOP block: render only when we have data; hide entirely on "unknown" tone.
+    if whoop.get("tone") == "unknown" or whoop.get("recovery") is None:
+        whoop_block = ""
+    else:
+        whoop_block = f"""  <!-- WHOOP TONE BAR -->
   <div style="background:{tcfg['color']}10;border-left:4px solid {tcfg['color']};padding:14px 18px;border-radius:8px;margin-bottom:24px;">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
       <span style="font-size:22px;">{tcfg['icon']}</span>
@@ -278,7 +326,17 @@ def render_html(whoop: dict, jobs: list, followups: dict, linkedin: dict, tcfg: 
     </div>
     <div style="color:#1d1d1f;font-size:14px;margin:6px 0 8px 0;">{tcfg['msg']}</div>
     <div style="color:#86868b;font-size:12px;">Sleep {sleep_str} · HRV {hrv_str} · Rest HR {rhr_str}</div>
-  </div>
+  </div>"""
+
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;margin:0;padding:20px;background:#f5f5f7;color:#1d1d1f;">
+<div style="max-width:640px;margin:0 auto;background:white;border-radius:14px;padding:32px;box-shadow:0 2px 14px rgba(0,0,0,0.06);">
+
+  <div style="margin-bottom:8px;color:#86868b;font-size:13px;letter-spacing:0.5px;text-transform:uppercase;">Morning Brief</div>
+  <h1 style="margin:0 0 24px 0;font-size:26px;font-weight:600;letter-spacing:-0.5px;">{today}</h1>
+
+  {whoop_block}
 
   <!-- TOP JOBS -->
   <h2 style="margin:24px 0 12px 0;font-size:16px;font-weight:600;color:#1d1d1f;">🎯 Top Job Matches <span style="color:#86868b;font-weight:400;font-size:13px;">(score ≥ {tcfg['min_score']})</span></h2>
@@ -317,8 +375,19 @@ def main() -> int:
     linkedin = fetch_linkedin_nudge()
     print(f"LinkedIn: {linkedin.get('connections', '?')} connections, {linkedin.get('conversion_pct', '?')}% conversion")
 
-    html = render_html(whoop, jobs, followups, linkedin, tcfg)
-    subject = f"☀️ Morning Brief · {datetime.now().strftime('%a %b %-d')} · {tcfg['label']}"
+    warm_leads_by_job = fetch_warm_leads_for_jobs([j.get('job_id') for j in jobs if j.get('job_id')])
+    html = render_html(whoop, jobs, followups, linkedin, tcfg, warm_leads_by_job)
+    # Subject reflects job content, not WHOOP. Never put "NO DATA" in the subject.
+    if jobs:
+        top = jobs[0]
+        n_cl = sum(1 for j in jobs if (j.get('cover_letter') or '').strip())
+        n_warm = sum(len(v) for v in warm_leads_by_job.values())
+        bits = [f"{len(jobs)} new match{'es' if len(jobs) != 1 else ''}"]
+        if n_cl: bits.append(f"{n_cl} cover letter{'s' if n_cl != 1 else ''}")
+        if n_warm: bits.append(f"{n_warm} warm lead{'s' if n_warm != 1 else ''}")
+        subject = "☀️ Morning Brief · " + " · ".join(bits) + f" · top: {top['title'][:50]}"
+    else:
+        subject = "☀️ Morning Brief · " + datetime.now().strftime('%a %b %-d') + " · quiet day"
 
     if send_via_gmail_api(EMAIL_FROM, EMAIL_TO, subject, html):
         print(f"✅ Sent: {subject}")
