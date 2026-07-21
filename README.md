@@ -7,6 +7,7 @@ Primary end-to-end job pipeline: scanner → researcher → preparer → network
 - **Lifecycle:** Active (system of record for job automation)
 - **Owner system:** Unified Job Search Pipeline
 - **Execution:** `python3 run.py --mode pipeline|morning|nightly|all`
+- **Deployment:** Runs on a schedule via **GitHub Actions cron** (see `.github/workflows/`). This is a batch pipeline, **not** a web service — it is not a Cloudflare Worker and has no `wrangler` config. Do not connect it to Cloudflare Workers Builds; those deploys will always fail because there is no Worker to build.
 
 ## Scope
 
