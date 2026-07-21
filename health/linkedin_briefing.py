@@ -31,6 +31,19 @@ EMAIL_PASS = os.getenv('EMAIL_PASS') or os.getenv('EMAIL_PASSWORD')
 def get_connection():
     return sqlite3.connect(DB_PATH)
 
+def _parse_application_date(value):
+    """Parse a stored application_date (e.g. "3/16/26, 8:06 PM").
+
+    Returns a datetime for ordering. Unparseable or empty values sort oldest
+    so they never crowd out entries with a real date.
+    """
+    if value:
+        try:
+            return datetime.strptime(value.strip(), "%m/%d/%y, %I:%M %p")
+        except ValueError:
+            pass
+    return datetime.min
+
 def generate_briefing():
     """Generate daily intelligence briefing"""
     conn = get_connection()
@@ -78,14 +91,21 @@ def generate_briefing():
     saved_dir, applied_dir = cursor.fetchone()
     dir_avoidance = saved_dir / max(applied_dir, 1)
     
-    # Recent applications (last 30 days would need date field, using all for now)
+    # Recent applications, ordered by actual application_date (most recent first).
+    # application_date is stored as free text like "3/16/26, 8:06 PM", so it can't
+    # be sorted reliably in SQL — parse it in Python and rank by real date.
     cursor.execute("""
-        SELECT company_name, job_title
+        SELECT company_name, job_title, application_date
         FROM applications
-        ORDER BY ROWID DESC
-        LIMIT 3
     """)
-    recent_apps = cursor.fetchall()
+    recent_apps = [
+        (company, title)
+        for company, title, _ in sorted(
+            cursor.fetchall(),
+            key=lambda row: _parse_application_date(row[2]),
+            reverse=True,
+        )
+    ][:3]
     
     conn.close()
     
