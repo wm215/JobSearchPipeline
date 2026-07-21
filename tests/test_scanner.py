@@ -602,7 +602,7 @@ def test_scan_workday_saves_jobs(tmp_path):
             {
                 "title": "Program Manager, Federal Housing Programs",
                 "externalPath": "/job/Washington/Program-Manager_R12345",
-                "locationsText": "Washington, DC",
+                "locationsText": "Philadelphia, PA",
                 "postedOn": "Posted Yesterday",
                 "bulletFields": ["R12345"],
             }
@@ -710,7 +710,7 @@ def test_scan_greenhouse_saves_jobs(tmp_path):
                 "title": "Senior Policy Analyst, Housing",
                 "company_name": "Local Initiatives Support Corporation",
                 "absolute_url": "https://job-boards.greenhouse.io/lisc/jobs/4673281005",
-                "location": {"name": "Washington, DC"},
+                "location": {"name": "Philadelphia, PA"},
                 "updated_at": "2026-04-07T16:31:38-04:00",
                 "content": "<p>Lead community development and HUD policy work.</p>",
             }

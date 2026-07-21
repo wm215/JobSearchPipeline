@@ -107,7 +107,7 @@ def test_passes_salary_gate_when_max_gte_90k():
         title="Program Analyst",
         description="Housing authority program management",
         company="HUD",
-        location="Chicago, IL",
+        location="Philadelphia, PA",
         salary_min=85000,
         salary_max=95000,
     )
@@ -156,7 +156,7 @@ def test_scores_perfect_hud_job():
             "compliance oversight, federal policy, procurement and contracting support"
         ),
         company="U.S. Department of Housing and Urban Development",
-        location="Chicago, IL",
+        location="Philadelphia, PA",
         salary_min=99000,
         salary_max=129000,
     )
@@ -172,7 +172,7 @@ def test_contract_specialist_scores_well():
             "procurement, government policy, oversight and regulatory management"
         ),
         company="Customs and Border Protection",
-        location="Washington, DC",
+        location="Philadelphia, PA",
         salary_min=100000,
         salary_max=140000,
     )
@@ -180,15 +180,15 @@ def test_contract_specialist_scores_well():
     assert result["status"] in ("TOP_MATCH", "REVIEW")
 
 
-def test_city_of_chicago_housing_scores_high():
+def test_city_of_philadelphia_housing_scores_high():
     result = score_job(
         title="Housing Program Manager",
         description=(
-            "Manage affordable housing programs for the City of Chicago. "
+            "Manage affordable housing programs for the City of Philadelphia. "
             "Stakeholder engagement, compliance, community development, budget oversight."
         ),
-        company="City of Chicago",
-        location="Chicago, IL",
+        company="City of Philadelphia",
+        location="Philadelphia, PA",
         salary_min=95000,
         salary_max=125000,
     )
@@ -201,7 +201,7 @@ def test_no_salary_listed_gets_neutral_score():
         title="Program Analyst",
         description="Federal housing policy and grants management",
         company="HUD",
-        location="Washington, DC",
+        location="Philadelphia, PA",
         salary_min=None,
         salary_max=None,
     )
@@ -210,9 +210,9 @@ def test_no_salary_listed_gets_neutral_score():
     assert result["breakdown"]["salary"] == 5
 
 
-def test_remote_job_gets_second_tier_location_score():
-    """Remote/telework counts as second-tier (9 pts), same as Chicago —
-    hybrid-Philly / hybrid-Chicago / fully-remote are all acceptable."""
+def test_remote_job_gets_full_location_score():
+    """Remote roles get the full 10 pts (bumped 2026-05-29) so fully-remote
+    positions can reach TOP_MATCH now that Will has relocated to Philly."""
     result = score_job(
         title="Policy Analyst",
         description="Federal policy analysis, stakeholder engagement, compliance",
@@ -221,11 +221,13 @@ def test_remote_job_gets_second_tier_location_score():
         salary_min=100000,
         salary_max=130000,
     )
-    assert result["breakdown"]["location"] == 9
+    assert result["breakdown"]["location"] == 10
 
 
-def test_washington_dc_slam_dunk_gets_full_location_score():
-    """DC jobs at GS-14+ salary ($130k+) get full 10 pts location."""
+def test_washington_dc_is_disqualified():
+    """DC dropped 2026-05-29 (Will relocated to Philly, no DC commute).
+    Even a high-salary HUD role in DC now scores 0 on location and is
+    disqualified by the hard location gate."""
     result = score_job(
         title="Program Analyst",
         description="Federal housing program management",
@@ -234,20 +236,27 @@ def test_washington_dc_slam_dunk_gets_full_location_score():
         salary_min=135000,
         salary_max=175000,
     )
-    assert result["breakdown"]["location"] == 10
+    assert result["status"] == "DISQUALIFIED"
+    assert result["breakdown"]["location"] == 0
 
 
-def test_washington_dc_below_slam_dunk_gets_low_location_score():
-    """DC jobs under $130k salary get only 3 pts — slam-dunk-only policy."""
+def test_location_hard_gate_disqualifies_off_target_role():
+    """The hard location gate (added 2026-05-29) disqualifies otherwise-strong
+    jobs in non-target regions — a perfect HUD role in Denver scores 0, not 90+
+    on domain/skills alone."""
     result = score_job(
         title="Program Analyst",
-        description="Federal housing program management",
-        company="HUD",
-        location="Washington, DC",
-        salary_min=100000,
-        salary_max=130000,
+        description=(
+            "HUD field office program management, CDBG grants, stakeholder liaison, "
+            "compliance oversight, federal policy, procurement and contracting support"
+        ),
+        company="U.S. Department of Housing and Urban Development",
+        location="Denver, CO",
+        salary_min=120000,
+        salary_max=150000,
     )
-    assert result["breakdown"]["location"] == 3
+    assert result["status"] == "DISQUALIFIED"
+    assert result["total_score"] == 0
 
 
 def test_non_target_location_gets_default_score():
@@ -279,7 +288,7 @@ def test_breakdown_keys_present():
         title="Program Analyst",
         description="Federal housing program management",
         company="HUD",
-        location="Chicago, IL",
+        location="Philadelphia, PA",
         salary_min=100000,
         salary_max=130000,
     )
@@ -313,7 +322,7 @@ def test_private_sector_cap_limits_domain():
             "program management, compliance, procurement, grants, housing policy"
         ),
         company="Google",
-        location="Washington, DC",
+        location="Philadelphia, PA",
         salary_min=150000,
         salary_max=200000,
     )
@@ -325,7 +334,7 @@ def test_skip_status_for_weak_match():
         title="Coordinator",
         description="General coordination and scheduling for office operations",
         company="Small Local Company",
-        location="Springfield, IL",
+        location="Philadelphia, PA",
         salary_min=90000,
         salary_max=95000,
     )
@@ -343,7 +352,7 @@ def test_linkedin_connection_bonus_hud():
         title="Program Analyst",
         description="Federal program management",
         company="U.S. Department of Housing and Urban Development",
-        location="Washington, DC",
+        location="Philadelphia, PA",
         salary_min=100000,
         salary_max=130000,
     )
@@ -370,7 +379,7 @@ def test_linkedin_app_history_bonus():
         title="Housing Manager",
         description="Affordable housing program management",
         company="Chicago Housing Authority",
-        location="Chicago, IL",
+        location="Philadelphia, PA",
         salary_min=95000,
         salary_max=125000,
     )
@@ -404,7 +413,7 @@ def test_no_linkedin_bonus_for_unknown_company():
         title="Analyst",
         description="General analysis work",
         company="Random Unknown Corp",
-        location="Denver, CO",
+        location="Philadelphia, PA",
         salary_min=95000,
         salary_max=110000,
     )
