@@ -5,7 +5,7 @@ with a single brief that:
   1. Fetches WHOOP recovery FIRST — sets the tone (Red/Yellow/Green)
   2. Surfaces top jobs from the pipeline DB (count + threshold scale with recovery)
   3. Lists applications needing follow-up
-  4. Adds LinkedIn intelligence nudge (apply rate, top targets)
+  4. Adds LinkedIn intelligence nudge (apply rate, top targets, recent applications)
 
 Tone shifts by recovery:
   Red    (≤33%):  show top 3 ≥85, suggest rest, suppress stretch roles
@@ -211,6 +211,20 @@ def fetch_followups() -> dict:
 
 
 # ── LinkedIn intelligence ────────────────────────────────────────────────────
+def _parse_application_date(value) -> datetime:
+    """Parse a stored application_date (e.g. "3/16/26, 8:06 PM").
+
+    Returns a datetime for ordering. Unparseable or empty values sort oldest
+    so they never crowd out entries with a real date.
+    """
+    if value:
+        try:
+            return datetime.strptime(value.strip(), "%m/%d/%y, %I:%M %p")
+        except ValueError:
+            pass
+    return datetime.min
+
+
 def fetch_linkedin_nudge() -> dict:
     if not Path(LINKEDIN_DB).exists():
         return {}
@@ -227,6 +241,18 @@ def fetch_linkedin_nudge() -> dict:
         cur.execute("""SELECT company, COUNT(*) FROM connections
                        WHERE company != '' GROUP BY company ORDER BY 2 DESC LIMIT 3""")
         top_targets = cur.fetchall()
+        # Most recent applications, ranked by real application_date. The column
+        # is free text (e.g. "3/16/26, 8:06 PM") so it can't be sorted in SQL —
+        # parse in Python and take the newest three.
+        cur.execute("SELECT company_name, job_title, application_date FROM applications")
+        recent_apps = [
+            (company, title)
+            for company, title, _ in sorted(
+                cur.fetchall(),
+                key=lambda row: _parse_application_date(row[2]),
+                reverse=True,
+            )
+        ][:3]
         conn.close()
         return {
             "connections": connections,
@@ -234,6 +260,7 @@ def fetch_linkedin_nudge() -> dict:
             "saved": saved,
             "conversion_pct": conv,
             "top_targets": top_targets,
+            "recent_apps": recent_apps,
         }
     except Exception as exc:
         print(f"⚠️  LinkedIn fetch failed: {exc}")
@@ -301,6 +328,17 @@ def render_html(whoop: dict, jobs: list, followups: dict, linkedin: dict, tcfg: 
         if linkedin.get("conversion_pct", 0) < 10 and linkedin.get("saved", 0) > linkedin.get("apps", 0) * 5:
             nudge = f"<div style='background:#fff3e0;padding:10px;border-radius:6px;margin-top:8px;color:#7a4100;font-size:13px;'>You've saved {linkedin['saved']} jobs but only applied to {linkedin['apps']}. Conversion {linkedin['conversion_pct']}% — push past the saving phase.</div>"
         targets = " · ".join(f"{c} ({n})" for c, n in linkedin.get("top_targets", []))
+        recent_block = ""
+        recent_apps = linkedin.get("recent_apps", [])
+        if recent_apps:
+            recent_rows = "".join(
+                f"<li style='margin:2px 0;'>{title} <span style='color:#86868b;'>· {company}</span></li>"
+                for company, title in recent_apps
+            )
+            recent_block = (
+                "<p style=\"margin:10px 0 4px 0;color:#1d1d1f;font-size:13px;font-weight:600;\">Recent applications</p>"
+                f"<ul style='margin:0;padding-left:18px;color:#1d1d1f;font-size:13px;'>{recent_rows}</ul>"
+            )
         li_section = f"""
         <p style="margin:6px 0;color:#1d1d1f;font-size:14px;">
           <strong>{linkedin.get('connections', 0):,}</strong> connections ·
@@ -308,6 +346,7 @@ def render_html(whoop: dict, jobs: list, followups: dict, linkedin: dict, tcfg: 
           <strong>{linkedin.get('saved', 0)}</strong> saved
         </p>
         <p style="margin:6px 0;color:#5e5ce6;font-size:13px;">Top connection density: {targets}</p>
+        {recent_block}
         {nudge}
         """
     else:

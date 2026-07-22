@@ -7,14 +7,8 @@ on:
     # killing the cron. Morning brief reads WHOOP from the sheet (populated
     # by the local whoop-mcp on the laptop) and degrades gracefully if empty.
     - cron: "30 11 * * *"
+  # Manual trigger re-runs the same scheduled morning brief on demand.
   workflow_dispatch:
-    inputs:
-      script:
-        description: "Which to run"
-        required: true
-        default: "morning_brief"
-        type: choice
-        options: [morning_brief, linkedin, all]
 
 jobs:
   run:
@@ -56,17 +50,7 @@ jobs:
         env:
           GMAIL_TOKEN_B64: ${{ secrets.GMAIL_TOKEN_B64 }}
 
-      - name: Decide what to run
-        id: choose
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "script=${{ github.event.inputs.script }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "script=morning_brief" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Run morning brief (unified email)
-        if: steps.choose.outputs.script == 'morning_brief' || steps.choose.outputs.script == 'all'
         env:
           EMAIL_FROM:       ${{ secrets.EMAIL_FROM }}
           EMAIL_TO:         ${{ secrets.EMAIL_TO }}
@@ -74,15 +58,6 @@ jobs:
         run: |
           cd "${{ github.workspace }}"
           PYTHONPATH=. python health/morning_brief.py
-
-      - name: Run LinkedIn briefing (legacy standalone — manual only)
-        if: steps.choose.outputs.script == 'linkedin'
-        env:
-          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          EMAIL_TO:   ${{ secrets.EMAIL_TO }}
-        run: |
-          cd "${{ github.workspace }}"
-          PYTHONPATH=. python -c "import sys; sys.path.insert(0,'health'); import linkedin_briefing; linkedin_briefing.send_briefing()"
 
       - name: Healthcheck ping
         if: success() && env.HEALTHCHECK_PERSONAL_URL != ''
