@@ -392,9 +392,21 @@ class AccurateJobTracker:
             'delivery status', 'delivery notification', 'shipping update',
             'canceled reservation', 'your reservation',
             'sf85p', 'please make correction', 'review and follow-up',
+            # Jul 2026 cleanup - USAJOBS/system notifications that are NOT applications
+            'has closed', 'is closing in', 'daily saved search',
+            'developer api key', 'career alert', 'new careers matching',
+            'update to a job you started',
         ]
         if any(invalid in position_lower for invalid in invalid_partials):
             return False, f"Email subject pattern: {position}"
+
+        # Reject bare USAJOBS announcement-code notifications, e.g. "Announcement CGA",
+        # "Announcement PR", "Announcement 26-HUD-12928204" (no real job title).
+        # Real applications that merely cite an announcement number lead with the
+        # job title (e.g. "...Project Manager, GS-0343-13 (Announcement ...)"), so
+        # anchoring to the start keeps those.
+        if re.match(r'^announcement\s+[a-z0-9\-]{1,12}$', position_lower):
+            return False, f"USAJOBS announcement notification: {position}"
 
         # Check if it's just "director" or generic single words
         if position_lower in ['director', 'manager', 'analyst', 'your', 'completed', 'working']:
