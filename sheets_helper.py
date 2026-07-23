@@ -61,7 +61,17 @@ def get_sheets_service():
     return build('sheets', 'v4', credentials=creds)
 
 def get_spreadsheet_id():
-    """Get spreadsheet ID from config"""
+    """Get spreadsheet ID.
+
+    Resolution order:
+    1. GOOGLE_SHEETS_ID env var (used by CI/cloud runs, which have no
+       local config file). The pipeline workflow passes this from a secret.
+    2. ~/.job_tracker_config file (local dev machines).
+    """
+    env_id = os.environ.get('GOOGLE_SHEETS_ID')
+    if env_id:
+        return env_id.strip()
+
     config_path = os.path.expanduser('~/.job_tracker_config')
     if not os.path.exists(config_path):
         return None

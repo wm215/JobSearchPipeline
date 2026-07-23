@@ -67,16 +67,17 @@ jobs:
       - name: Determine mode (cron vs manual)
         id: mode
         run: |
-          # workflow_dispatch passes a chosen mode; cron decides by hour
+          # workflow_dispatch passes a chosen mode; cron decides by WHICH
+          # schedule triggered it. github.event.schedule holds the exact cron
+          # string, so we key off the trigger, not the wall clock. This is
+          # robust to GitHub's scheduler delays, which routinely push a
+          # 01:00 UTC run past 01:59 and previously made it skip nightly mode.
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event.schedule }}" == "0 1 * * *" ]]; then
+            echo "mode=nightly" >> "$GITHUB_OUTPUT"
           else
-            HOUR=$(date -u +%H)
-            if [[ "$HOUR" == "01" ]]; then
-              echo "mode=nightly" >> "$GITHUB_OUTPUT"
-            else
-              echo "mode=pipeline" >> "$GITHUB_OUTPUT"
-            fi
+            echo "mode=pipeline" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run pipeline mode
