@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
-      contents: read
+      contents: write
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -95,6 +95,25 @@ jobs:
           GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
         run: |
           python run.py --mode ${{ steps.mode.outputs.mode }}
+
+      - name: Export opportunities snapshot for dashboard
+        run: python export_opportunities.py
+
+      - name: Push opportunities snapshot to repo
+        run: |
+          git config user.name "job-pipeline-bot"
+          git config user.email "actions@github.com"
+          if [ -f data/latest_opportunities.json ]; then
+            git add data/latest_opportunities.json
+            if ! git diff --cached --quiet; then
+              git commit -m "Update opportunities snapshot [skip ci]"
+              git push
+            else
+              echo "No changes to opportunities snapshot."
+            fi
+          else
+            echo "No opportunities snapshot produced this run."
+          fi
 
       - name: Save DB to cache
         if: always()
