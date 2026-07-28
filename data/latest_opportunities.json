@@ -585,6 +585,19 @@
     "automation_blocked": 0
   },
   {
+    "job_id": "d8a130455b6619775aa51e067b089bd7",
+    "title": "Deputy Director of Worker Protections",
+    "company": "City of Philadelphia, PA",
+    "location": "Philadelphia, PA, US",
+    "url": "https://www.indeed.com/viewjob?jk=4977e94bbe816f72",
+    "match_score": 100.0,
+    "salary_min": 105000,
+    "salary_max": 135000,
+    "sector": "Private",
+    "found_date": "2026-07-28T21:38:09.296433+00:00",
+    "automation_blocked": 0
+  },
+  {
     "job_id": "67791a2cccebd5ab5a4c3e35bc944ff8",
     "title": "Compliance Manager (Mid-Atlantic Region)",
     "company": "WinnCompanies",
@@ -1284,19 +1297,6 @@
     "salary_max": null,
     "sector": "Private",
     "found_date": "2026-05-27T16:11:04.356057+00:00",
-    "automation_blocked": 0
-  },
-  {
-    "job_id": "5ad30f5a1c6b2f7509225b921073168c",
-    "title": "Operations Management Trainee",
-    "company": "The Philadelphia Housing Authority",
-    "location": "Philadelphia, PA, US",
-    "url": "https://www.indeed.com/viewjob?jk=580ce2056548cdca",
-    "match_score": 94.0,
-    "salary_min": null,
-    "salary_max": null,
-    "sector": "Private",
-    "found_date": "2026-06-01T21:47:23.569035+00:00",
     "automation_blocked": 0
   }
 ]
