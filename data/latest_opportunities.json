@@ -598,6 +598,45 @@
     "automation_blocked": 0
   },
   {
+    "job_id": "7434b8e77b7706b007b8670ef7490cce",
+    "title": "Executive Director-Prison's Oversight Board",
+    "company": "City of Philadelphia, PA",
+    "location": "Philadelphia, PA, US",
+    "url": "https://www.indeed.com/viewjob?jk=c2f06c61a340ebff",
+    "match_score": 100.0,
+    "salary_min": 160000,
+    "salary_max": 180000,
+    "sector": "Private",
+    "found_date": "2026-07-28T22:59:27.832893+00:00",
+    "automation_blocked": 0
+  },
+  {
+    "job_id": "ee8a8effc74aa549d63841d55409ba49",
+    "title": "Deputy Director of Worker Protections",
+    "company": "City of Philadelphia",
+    "location": "Philadelphia, PA",
+    "url": "https://www.linkedin.com/jobs/view/4446393060",
+    "match_score": 100.0,
+    "salary_min": null,
+    "salary_max": null,
+    "sector": "Private",
+    "found_date": "2026-07-28T23:03:45.626603+00:00",
+    "automation_blocked": 0
+  },
+  {
+    "job_id": "97257781e510db3ed28649feeed43223",
+    "title": "Executive Director-Prison's Oversight Board",
+    "company": "City of Philadelphia",
+    "location": "Philadelphia, PA",
+    "url": "https://www.linkedin.com/jobs/view/4446383770",
+    "match_score": 100.0,
+    "salary_min": null,
+    "salary_max": null,
+    "sector": "Private",
+    "found_date": "2026-07-28T23:05:53.765343+00:00",
+    "automation_blocked": 0
+  },
+  {
     "job_id": "67791a2cccebd5ab5a4c3e35bc944ff8",
     "title": "Compliance Manager (Mid-Atlantic Region)",
     "company": "WinnCompanies",
@@ -881,6 +920,19 @@
     "salary_max": null,
     "sector": "Private",
     "found_date": "2026-07-13T18:22:09.123911+00:00",
+    "automation_blocked": 0
+  },
+  {
+    "job_id": "84c542f3650eb3f446f3dc61bba96506",
+    "title": "Project Manager",
+    "company": "City of Philadelphia",
+    "location": "Philadelphia, PA",
+    "url": "https://www.linkedin.com/jobs/view/4446369357",
+    "match_score": 98.0,
+    "salary_min": null,
+    "salary_max": null,
+    "sector": "Private",
+    "found_date": "2026-07-28T22:59:28.069059+00:00",
     "automation_blocked": 0
   },
   {
@@ -1245,58 +1297,6 @@
     "salary_max": null,
     "sector": "Private",
     "found_date": "2026-05-17T14:08:52.872486+00:00",
-    "automation_blocked": 0
-  },
-  {
-    "job_id": "ff74b9911739c58d3d34262829b1d8fc",
-    "title": "Executive Director",
-    "company": "Oxford Circle Christian Community Development Association",
-    "location": "Philadelphia, PA, US",
-    "url": "https://www.indeed.com/viewjob?jk=78e361123e248abf",
-    "match_score": 94.0,
-    "salary_min": 90000,
-    "salary_max": 115000,
-    "sector": "Private",
-    "found_date": "2026-05-19T15:04:59.507155+00:00",
-    "automation_blocked": 0
-  },
-  {
-    "job_id": "fda347268eb3c2a7712118e11b5fe28f",
-    "title": "Director, CDBG- DR",
-    "company": "City of Philadelphia, PA",
-    "location": "Philadelphia, PA, US",
-    "url": "https://www.indeed.com/viewjob?jk=3ba91389fd557042",
-    "match_score": 94.0,
-    "salary_min": null,
-    "salary_max": null,
-    "sector": "Private",
-    "found_date": "2026-05-27T15:53:50.520148+00:00",
-    "automation_blocked": 0
-  },
-  {
-    "job_id": "be31d12d26be208a6445520e687ff671",
-    "title": "Property Manager",
-    "company": "Philadelphia Housing Authority",
-    "location": "Philadelphia, PA",
-    "url": "https://www.linkedin.com/jobs/view/4419890078",
-    "match_score": 94.0,
-    "salary_min": null,
-    "salary_max": null,
-    "sector": "Private",
-    "found_date": "2026-05-27T16:11:04.349030+00:00",
-    "automation_blocked": 0
-  },
-  {
-    "job_id": "9e3f80ebc39c07c66906493a393380fe",
-    "title": "Director, CDBG- DR",
-    "company": "City of Philadelphia",
-    "location": "Philadelphia, PA",
-    "url": "https://www.linkedin.com/jobs/view/4419847592",
-    "match_score": 94.0,
-    "salary_min": null,
-    "salary_max": null,
-    "sector": "Private",
-    "found_date": "2026-05-27T16:11:04.356057+00:00",
     "automation_blocked": 0
   }
 ]
