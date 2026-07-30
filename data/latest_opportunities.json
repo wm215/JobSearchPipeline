@@ -949,6 +949,19 @@
     "automation_blocked": 0
   },
   {
+    "job_id": "d2d0428763d4651e20a681c8503547fb",
+    "title": "Technical Relationship Project Manager",
+    "company": "City of Philadelphia",
+    "location": "Philadelphia, PA",
+    "url": "https://www.linkedin.com/jobs/view/4446334120",
+    "match_score": 98.0,
+    "salary_min": null,
+    "salary_max": null,
+    "sector": "Private",
+    "found_date": "2026-07-30T17:27:22.840491+00:00",
+    "automation_blocked": 0
+  },
+  {
     "job_id": "407b8cdbe189f629d92846ad4beab94e",
     "title": "Assistant Program Manager, Police-Assisted Diversion",
     "company": "City of Philadelphia",
@@ -1284,19 +1297,6 @@
     "salary_max": 306000,
     "sector": "Private",
     "found_date": "2026-05-17T13:58:02.569310+00:00",
-    "automation_blocked": 0
-  },
-  {
-    "job_id": "61120abb42fa127d0e34a6e1a05bd5d7",
-    "title": "Investigator",
-    "company": "Chicago Housing Authority",
-    "location": "Chicago, IL",
-    "url": "https://www.linkedin.com/jobs/view/4414282093",
-    "match_score": 94.0,
-    "salary_min": null,
-    "salary_max": null,
-    "sector": "Private",
-    "found_date": "2026-05-17T14:08:52.871906+00:00",
     "automation_blocked": 0
   }
 ]
