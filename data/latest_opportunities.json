@@ -962,6 +962,19 @@
     "automation_blocked": 0
   },
   {
+    "job_id": "b07f9915cad01bf42e30699f96b7d978",
+    "title": "Technical Relationship Manager",
+    "company": "City of Philadelphia",
+    "location": "Philadelphia, PA",
+    "url": "https://www.linkedin.com/jobs/view/4447070091",
+    "match_score": 98.0,
+    "salary_min": null,
+    "salary_max": null,
+    "sector": "Private",
+    "found_date": "2026-07-30T23:32:11.994279+00:00",
+    "automation_blocked": 0
+  },
+  {
     "job_id": "407b8cdbe189f629d92846ad4beab94e",
     "title": "Assistant Program Manager, Police-Assisted Diversion",
     "company": "City of Philadelphia",
@@ -1284,19 +1297,6 @@
     "salary_max": 148052,
     "sector": "Private",
     "found_date": "2026-05-17T13:52:53.859981+00:00",
-    "automation_blocked": 0
-  },
-  {
-    "job_id": "6168da3ce1b339021a4ece8c5bbb5c49",
-    "title": "Senior Director - Audit AI, Product and Data Science",
-    "company": "Fannie Mae",
-    "location": "Washington, DC, US",
-    "url": "https://www.indeed.com/viewjob?jk=fea87f23e4935123",
-    "match_score": 94.0,
-    "salary_min": 226000,
-    "salary_max": 306000,
-    "sector": "Private",
-    "found_date": "2026-05-17T13:58:02.569310+00:00",
     "automation_blocked": 0
   }
 ]
