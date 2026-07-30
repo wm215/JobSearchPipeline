@@ -637,6 +637,19 @@
     "automation_blocked": 0
   },
   {
+    "job_id": "6668298a147c34f73ad474e3663bf183",
+    "title": "Community Empowerment & Opportunity - Operations Manager",
+    "company": "City of Philadelphia",
+    "location": "Philadelphia, PA",
+    "url": "https://www.linkedin.com/jobs/view/4445201193",
+    "match_score": 99.0,
+    "salary_min": null,
+    "salary_max": null,
+    "sector": "Private",
+    "found_date": "2026-07-30T14:22:01.494136+00:00",
+    "automation_blocked": 0
+  },
+  {
     "job_id": "67791a2cccebd5ab5a4c3e35bc944ff8",
     "title": "Compliance Manager (Mid-Atlantic Region)",
     "company": "WinnCompanies",
@@ -1284,19 +1297,6 @@
     "salary_max": null,
     "sector": "Private",
     "found_date": "2026-05-17T14:08:52.871906+00:00",
-    "automation_blocked": 0
-  },
-  {
-    "job_id": "4db5d9129783ea1c3bacb73b040cc86b",
-    "title": "Data Integrity Analyst",
-    "company": "Chicago Housing Authority",
-    "location": "Chicago, IL",
-    "url": "https://www.linkedin.com/jobs/view/4414270430",
-    "match_score": 94.0,
-    "salary_min": null,
-    "salary_max": null,
-    "sector": "Private",
-    "found_date": "2026-05-17T14:08:52.872486+00:00",
     "automation_blocked": 0
   }
 ]
