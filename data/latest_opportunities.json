@@ -637,6 +637,19 @@
     "automation_blocked": 0
   },
   {
+    "job_id": "18556db666e427874589011bbf13ea3a",
+    "title": "Facilities (Coordinator) Engineer",
+    "company": "Philadelphia Housing Authority",
+    "location": "Philadelphia, PA",
+    "url": "https://www.linkedin.com/jobs/view/4447577442",
+    "match_score": 100.0,
+    "salary_min": null,
+    "salary_max": null,
+    "sector": "Private",
+    "found_date": "2026-07-31T19:38:18.032177+00:00",
+    "automation_blocked": 0
+  },
+  {
     "job_id": "6668298a147c34f73ad474e3663bf183",
     "title": "Community Empowerment & Opportunity - Operations Manager",
     "company": "City of Philadelphia",
@@ -1284,19 +1297,6 @@
     "salary_max": null,
     "sector": "Local",
     "found_date": "2026-05-17T13:42:53.185410+00:00",
-    "automation_blocked": 0
-  },
-  {
-    "job_id": "ca2c237a9c8038c0237c1f206e538ce6",
-    "title": "Senior Manager, Local Government Relations",
-    "company": "Ziply Fiber",
-    "location": "Chicago, IL, US",
-    "url": "https://www.indeed.com/viewjob?jk=8ed4122e7ac6f764",
-    "match_score": 94.0,
-    "salary_min": 117500,
-    "salary_max": 148052,
-    "sector": "Private",
-    "found_date": "2026-05-17T13:52:53.859981+00:00",
     "automation_blocked": 0
   }
 ]
