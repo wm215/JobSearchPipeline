@@ -650,6 +650,19 @@
     "automation_blocked": 0
   },
   {
+    "job_id": "b2928f22692f840f7dcb8e7b8b38ffc4",
+    "title": "Supervisory Contract Specialist",
+    "company": "Federal Emergency Management Agency",
+    "location": "Multiple Locations",
+    "url": "https://www.usajobs.gov:443/job/879223700",
+    "match_score": 100.0,
+    "salary_min": 148222,
+    "salary_max": 192694,
+    "sector": "Federal",
+    "found_date": "2026-08-05T14:05:06.260524+00:00",
+    "automation_blocked": 0
+  },
+  {
     "job_id": "6668298a147c34f73ad474e3663bf183",
     "title": "Community Empowerment & Opportunity - Operations Manager",
     "company": "City of Philadelphia",
@@ -1284,19 +1297,6 @@
     "salary_max": 250000,
     "sector": "Private",
     "found_date": "2026-07-22T17:33:42.861992+00:00",
-    "automation_blocked": 0
-  },
-  {
-    "job_id": "24fa28880f1006959a5139bd1bc1605a",
-    "title": "Grants Management and Compliance Officer",
-    "company": "City of Philadelphia",
-    "location": "Philadelphia, PA",
-    "url": "https://api.smartrecruiters.com/v1/companies/CityofPhiladelphia/postings/744000123474374",
-    "match_score": 94.0,
-    "salary_min": null,
-    "salary_max": null,
-    "sector": "Local",
-    "found_date": "2026-05-17T13:42:53.185410+00:00",
     "automation_blocked": 0
   }
 ]
