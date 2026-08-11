@@ -1001,6 +1001,19 @@
     "automation_blocked": 0
   },
   {
+    "job_id": "858308320ee1c032f04593c164bff446",
+    "title": "Strategic Partnerships & Events Project Manager",
+    "company": "City of Philadelphia",
+    "location": "Philadelphia, PA",
+    "url": "https://www.linkedin.com/jobs/view/4452471448",
+    "match_score": 98.0,
+    "salary_min": null,
+    "salary_max": null,
+    "sector": "Private",
+    "found_date": "2026-08-11T15:08:56.339776+00:00",
+    "automation_blocked": 0
+  },
+  {
     "job_id": "407b8cdbe189f629d92846ad4beab94e",
     "title": "Assistant Program Manager, Police-Assisted Diversion",
     "company": "City of Philadelphia",
@@ -1284,19 +1297,6 @@
     "salary_max": null,
     "sector": "Private",
     "found_date": "2026-07-18T21:05:37.779777+00:00",
-    "automation_blocked": 0
-  },
-  {
-    "job_id": "ac6831cf13f8354e392f671854b9aa21",
-    "title": "Executive Director, HR Business Partnership & Client Services",
-    "company": "University of Pennsylvania",
-    "location": "Philadelphia, PA, US",
-    "url": "https://www.indeed.com/viewjob?jk=387e248e9731c2e2",
-    "match_score": 95.0,
-    "salary_min": 170000,
-    "salary_max": 250000,
-    "sector": "Private",
-    "found_date": "2026-07-22T17:33:42.861992+00:00",
     "automation_blocked": 0
   }
 ]
