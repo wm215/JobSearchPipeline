@@ -1,7 +1,12 @@
 """morning_brief.py — One unified daily email at 7:30 AM.
 
-Replaces three separate emails (job digest, follow-ups, LinkedIn brief)
-with a single brief that:
+As of 2026-08-16 the job search is over (offer accepted), so JOB_SEARCH_ACTIVE
+is False and this sends a health-only brief: WHOOP recovery and tone. The job
+sections below are kept intact and gated, not deleted, so a future search is a
+one-line change. See JOB_SEARCH_ACTIVE.
+
+When JOB_SEARCH_ACTIVE is True it replaces three separate emails (job digest,
+follow-ups, LinkedIn brief) with a single brief that:
   1. Fetches WHOOP recovery FIRST — sets the tone (Red/Yellow/Green)
   2. Surfaces top jobs from the pipeline DB (count + threshold scale with recovery)
   3. Lists applications needing follow-up
@@ -40,6 +45,14 @@ EMAIL_TO = os.getenv('EMAIL_TO', 'wmelendez215@gmail.com')
 JOB_DB = str(REPO / "data" / "job_pipeline.db")
 LINKEDIN_DB = str(REPO / "health" / "linkedin_intelligence.db")
 SHEET_ID = "1tHZtK4qxJOUU7J-1mYbGI05n-azp4md-QDb85zAAAQI"
+
+# Job search ended 2026-08-16 — offer accepted. The "Job Search Pipeline"
+# workflow is disabled, so the jobs table no longer receives fresh rows and
+# every job-derived section would render stale or empty. Setting this False
+# drops the job/follow-up/LinkedIn sections and makes the brief health-only.
+# To resume a search: flip this to True and re-enable the workflow with
+#   gh workflow enable "Job Search Pipeline" --repo wm215/JobSearchPipeline
+JOB_SEARCH_ACTIVE = False
 
 
 # ── WHOOP recovery → tone ────────────────────────────────────────────────────
@@ -367,16 +380,10 @@ def render_html(whoop: dict, jobs: list, followups: dict, linkedin: dict, tcfg: 
     <div style="color:#86868b;font-size:12px;">Sleep {sleep_str} · HRV {hrv_str} · Rest HR {rhr_str}</div>
   </div>"""
 
-    return f"""<!doctype html>
-<html><head><meta charset="utf-8"></head>
-<body style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;margin:0;padding:20px;background:#f5f5f7;color:#1d1d1f;">
-<div style="max-width:640px;margin:0 auto;background:white;border-radius:14px;padding:32px;box-shadow:0 2px 14px rgba(0,0,0,0.06);">
-
-  <div style="margin-bottom:8px;color:#86868b;font-size:13px;letter-spacing:0.5px;text-transform:uppercase;">Morning Brief</div>
-  <h1 style="margin:0 0 24px 0;font-size:26px;font-weight:600;letter-spacing:-0.5px;">{today}</h1>
-
-  {whoop_block}
-
+    # Job search ended — omit every job-derived section rather than render
+    # empty tables. See JOB_SEARCH_ACTIVE at the top of this file.
+    if JOB_SEARCH_ACTIVE:
+        job_sections = f"""
   <!-- TOP JOBS -->
   <h2 style="margin:24px 0 12px 0;font-size:16px;font-weight:600;color:#1d1d1f;">🎯 Top Job Matches <span style="color:#86868b;font-weight:400;font-size:13px;">(score ≥ {tcfg['min_score']})</span></h2>
   <table style="width:100%;border-collapse:collapse;border:1px solid #e5e5ea;border-radius:8px;overflow:hidden;">{job_rows}</table>
@@ -388,9 +395,31 @@ def render_html(whoop: dict, jobs: list, followups: dict, linkedin: dict, tcfg: 
   <!-- LINKEDIN -->
   <h2 style="margin:24px 0 12px 0;font-size:16px;font-weight:600;color:#1d1d1f;">🔗 LinkedIn Intelligence</h2>
   <div style="background:#f5f5f7;padding:14px;border-radius:8px;">{li_section}</div>
+"""
+        footer_note = "Cloud-hosted on GitHub Actions · One email replaces three."
+    else:
+        job_sections = ""
+        footer_note = "Cloud-hosted on GitHub Actions · Health brief."
+        # With the job sections gone, a missing WHOOP reading would leave the
+        # body empty. Say so explicitly instead of sending a blank card.
+        if not whoop_block:
+            job_sections = (
+                "\n  <div style=\"background:#f5f5f7;padding:14px;border-radius:8px;"
+                "color:#86868b;font-size:14px;\">No WHOOP recovery recorded yet for today.</div>\n"
+            )
 
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;margin:0;padding:20px;background:#f5f5f7;color:#1d1d1f;">
+<div style="max-width:640px;margin:0 auto;background:white;border-radius:14px;padding:32px;box-shadow:0 2px 14px rgba(0,0,0,0.06);">
+
+  <div style="margin-bottom:8px;color:#86868b;font-size:13px;letter-spacing:0.5px;text-transform:uppercase;">Morning Brief</div>
+  <h1 style="margin:0 0 24px 0;font-size:26px;font-weight:600;letter-spacing:-0.5px;">{today}</h1>
+
+  {whoop_block}
+{job_sections}
   <div style="margin-top:32px;padding-top:16px;border-top:1px solid #e5e5ea;color:#86868b;font-size:11px;text-align:center;">
-    Generated {datetime.now().strftime('%Y-%m-%d %H:%M ET')} · Cloud-hosted on GitHub Actions · One email replaces three.
+    Generated {datetime.now().strftime('%Y-%m-%d %H:%M ET')} · {footer_note}
   </div>
 </div>
 </body></html>"""
@@ -405,19 +434,31 @@ def main() -> int:
     tcfg = tone_config(whoop["tone"])
     print(f"Tone: {tcfg['label']} (min_score={tcfg['min_score']}, limit={tcfg['limit']})")
 
-    jobs = fetch_top_jobs(tcfg["min_score"], tcfg["limit"])
-    print(f"Jobs: {len(jobs)} matches ≥{tcfg['min_score']}")
+    if JOB_SEARCH_ACTIVE:
+        jobs = fetch_top_jobs(tcfg["min_score"], tcfg["limit"])
+        print(f"Jobs: {len(jobs)} matches ≥{tcfg['min_score']}")
 
-    followups = fetch_followups()
-    print(f"Follow-ups: {len(followups['urgent'])} urgent, {len(followups['soon'])} soon")
+        followups = fetch_followups()
+        print(f"Follow-ups: {len(followups['urgent'])} urgent, {len(followups['soon'])} soon")
 
-    linkedin = fetch_linkedin_nudge()
-    print(f"LinkedIn: {linkedin.get('connections', '?')} connections, {linkedin.get('conversion_pct', '?')}% conversion")
+        linkedin = fetch_linkedin_nudge()
+        print(f"LinkedIn: {linkedin.get('connections', '?')} connections, {linkedin.get('conversion_pct', '?')}% conversion")
 
-    warm_leads_by_job = fetch_warm_leads_for_jobs([j.get('job_id') for j in jobs if j.get('job_id')])
+        warm_leads_by_job = fetch_warm_leads_for_jobs([j.get('job_id') for j in jobs if j.get('job_id')])
+    else:
+        print("Job search inactive — health-only brief.")
+        jobs, followups, linkedin, warm_leads_by_job = [], {}, {}, {}
+
     html = render_html(whoop, jobs, followups, linkedin, tcfg, warm_leads_by_job)
     # Subject reflects job content, not WHOOP. Never put "NO DATA" in the subject.
-    if jobs:
+    if not JOB_SEARCH_ACTIVE:
+        # Health-only: lead with recovery, fall back to the date if WHOOP is empty.
+        day = datetime.now().strftime('%a %b %-d')
+        if whoop.get("recovery") is not None:
+            subject = f"☀️ Morning Brief · {day} · recovery {whoop['recovery']}% · {tcfg['label']}"
+        else:
+            subject = f"☀️ Morning Brief · {day}"
+    elif jobs:
         top = jobs[0]
         n_cl = sum(1 for j in jobs if (j.get('cover_letter') or '').strip())
         n_warm = sum(len(v) for v in warm_leads_by_job.values())
